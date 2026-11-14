@@ -13,7 +13,7 @@ from utils.api_error_handler import (
     handle_model_not_available_error
 )
 from utils.rate_limiter import rate_limiter
-router = APIRouter(prefix="/api/api-management", tags=["api-management"])
+router = APIRouter(prefix="/api-management", tags=["api-management"])
 
 def check_profile_rate_limit(profile_id: str, profile_rate_limit: int = 60):
     """Check if a profile has exceeded its rate limit"""
@@ -308,13 +308,13 @@ async def get_models_for_provider_endpoint(api_type: str):
         model_info = {
             'id': model,
             'name': model.replace('-', ' ').title(),
-            'type': self._get_model_type(model, api_type)
+            'type': _get_model_type(model, api_type)
         }
         models_with_metadata.append(model_info)
     
     return {"api_type": api_type, "models": models_with_metadata}
 
-def _get_model_type(self, model_id: str, api_type: str) -> str:
+def _get_model_type(model_id: str, api_type: str) -> str:
     """Determine model type based on name patterns"""
     if api_type == 'replicate':
         if model_id.startswith('whisper'):

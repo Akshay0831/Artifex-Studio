@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ThumbsUp, Loader2, FlaskConical, Globe, Wand2 } from 'lucide-react';
+import { ThumbsUp, Loader2, FlaskConical, Globe, Wand2, Palette, Plus, X, FolderOpen } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useStudioStore } from '../../core/useStudioStore';
 import { useArtGeneration } from '../../hooks/useArtGeneration';
@@ -9,6 +9,8 @@ import { useProjectConfig } from '../../core/useProjectConfig';
 import { StudioSelect, StudioToggle, StudioSlider } from '../../features/common/components/Controls';
 import CollapsibleSidebar, { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
 import ArtToolLookup from '../../components/lookup/ArtToolLookup';
+import type { ImagePaletteSettings, PaletteMode } from '../../types/api';
+import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
 
 export const ArtControls: React.FC = () => {
   const { yPrompt, yImage, yHistory, yExperimental, lastMessage } = useStudioStore();
@@ -17,6 +19,7 @@ export const ArtControls: React.FC = () => {
   const { 
     isGenerating, 
     variations, 
+    variationSettings,
     generate, 
     cancel, 
     numVariations, 
@@ -26,6 +29,11 @@ export const ArtControls: React.FC = () => {
 
   const [prompt, setPrompt] = useState('');
   const [seed, setSeed] = useState(0);
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>('off');
+  const [maxColors, setMaxColors] = useState(16);
+  const [paletteColors, setPaletteColors] = useState(['#1B1B1B', '#F4F4F4']);
+  const [paletteDither, setPaletteDither] = useState(false);
+  const [preserveAlpha, setPreserveAlpha] = useState(true);
   const [targetWorktree, setTargetWorktree] = useState<'main' | 'experimental'>('main');
   const [isRefining, setIsRefining] = useState(false);  const [selectedTool, setSelectedTool] = useState('brush');
   useEffect(() => {
@@ -50,25 +58,53 @@ export const ArtControls: React.FC = () => {
     return () => yPrompt.unobserve(update);
   }, [yPrompt, prompt, seed]);
 
+  useEffect(() => {
+    if (!yPrompt) return;
+    const update = () => {
+      const mode = yPrompt.get('paletteMode');
+      if (mode === 'off' || mode === 'extract' || mode === 'fixed' || mode === 'maximum') {
+        setPaletteMode(mode);
+      }
+      const count = yPrompt.get('paletteMaxColors');
+      if (typeof count === 'number' && count >= 1 && count <= 256) {
+        setMaxColors(count);
+      }
+      const colors = yPrompt.get('paletteColors');
+      if (
+        Array.isArray(colors) &&
+        colors.length > 0 &&
+        colors.length <= 256 &&
+        colors.every(color => typeof color === 'string')
+      ) {
+        setPaletteColors(colors);
+      }
+      setPaletteDither(yPrompt.get('paletteDither') === true);
+      setPreserveAlpha(yPrompt.get('palettePreserveAlpha') !== false);
+    };
+    yPrompt.observe(update);
+    update();
+    return () => yPrompt.unobserve(update);
+  }, [yPrompt]);
+
   const handleRefine = () => {
     setIsRefining(true);
     refinePrompt(prompt);
   };
 
-  useEffect(() => {
-    if (!yPrompt) return;
-    const update = () => {
-      const p = yPrompt.get('currentPrompt');
-      if (typeof p === 'string' && p !== prompt) setPrompt(p);
-      const s = yPrompt.get('currentSeed');
-      if (typeof s === 'number' && s !== seed) setSeed(s);
-    };
-    yPrompt.observe(update);
-    update();
-    return () => yPrompt.unobserve(update);
-  }, [yPrompt, prompt, seed]);
+  const paletteSettings = (): ImagePaletteSettings => ({
+    mode: paletteMode,
+    colors: paletteMode === 'fixed' ? paletteColors : [],
+    max_colors: paletteMode === 'maximum' || paletteMode === 'extract' ? maxColors : null,
+    dither: paletteDither,
+    preserve_alpha: preserveAlpha,
+  });
 
-  const promote = (data: string) => {
+  const updatePaletteColors = (colors: string[]) => {
+    setPaletteColors(colors);
+    yPrompt?.set('paletteColors', colors);
+  };
+
+  const promote = (data: string, settings: ImagePaletteSettings) => {
     if (targetWorktree === 'experimental') {
       const proposalId = `art-${Date.now()}`;
       const proposals = yExperimental.get('proposals') as any;
@@ -77,7 +113,8 @@ export const ArtControls: React.FC = () => {
         data: data,
         confidence: 1.0,
         timestamp: Date.now(),
-        source: 'user_experiment'
+        source: 'user_experiment',
+        generation_settings: { palette: settings },
       });
       toast.success('Added to Experimental Worktree');
       startReview(proposalId);
@@ -95,7 +132,8 @@ export const ArtControls: React.FC = () => {
         type: 'art',
         label: prompt || 'Generated Image',
         preview: `data:image/png;base64,${data}`,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        generation_settings: { palette: settings },
       }]);
     }
   };
@@ -104,7 +142,14 @@ export const ArtControls: React.FC = () => {
     if (isGenerating) {
       cancel();
     } else {
-      generate(prompt, seed, (yPrompt?.get('steps') as number) || 20, numVariations, targetWorktree);
+      generate(
+        prompt,
+        seed,
+        (yPrompt?.get('steps') as number) || 20,
+        numVariations,
+        paletteSettings(),
+        targetWorktree,
+      );
     }
   };
 
@@ -133,6 +178,10 @@ export const ArtControls: React.FC = () => {
               onToolSelect={setSelectedTool}
               showCompact={false}
             />
+          </SidebarSection>
+
+          <SidebarSection title="Project References" icon={FolderOpen}>
+            <ProjectReferenceLibrary />
           </SidebarSection>
 
           {/* Model Selection Section */}
@@ -221,6 +270,118 @@ export const ArtControls: React.FC = () => {
                 <StudioSlider label="Steps" yMap={yPrompt} stateKey="steps" min={10} max={50} className="flex-1" />
               </div>
 
+              <SidebarSection title="Palette / Color Limit" icon={Palette}>
+                <div className="flex flex-col gap-3">
+                  <label className="flex flex-col gap-1 text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
+                    Palette mode
+                    <select
+                      value={paletteMode}
+                      onChange={(event) => {
+                        const mode = event.target.value as PaletteMode;
+                        setPaletteMode(mode);
+                        yPrompt?.set('paletteMode', mode);
+                      }}
+                      className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
+                    >
+                      <option value="off">Unrestricted</option>
+                      <option value="maximum">Maximum colors</option>
+                      <option value="extract">Extract from generated image</option>
+                      <option value="fixed">Fixed palette</option>
+                    </select>
+                  </label>
+
+                  {(paletteMode === 'maximum' || paletteMode === 'extract') && (
+                    <label className="flex flex-col gap-1 text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
+                      Maximum colors (1-256)
+                      <input
+                        type="number"
+                        min={1}
+                        max={256}
+                        value={maxColors}
+                        onChange={(event) => {
+                          const count = Math.min(256, Math.max(1, Number(event.target.value) || 1));
+                          setMaxColors(count);
+                          yPrompt?.set('paletteMaxColors', count);
+                        }}
+                        className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs"
+                      />
+                    </label>
+                  )}
+
+                  {paletteMode === 'fixed' && (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
+                        Fixed colors
+                      </label>
+                      {paletteColors.map((color, index) => (
+                        <div key={`${index}-${color}`} className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={color}
+                            aria-label={`Palette color ${index + 1}`}
+                            onChange={(event) => {
+                              const colors = [...paletteColors];
+                              colors[index] = event.target.value.toUpperCase();
+                              updatePaletteColors(colors);
+                            }}
+                            className="h-7 w-10 bg-transparent"
+                          />
+                          <span className="flex-1 text-[10px] font-mono">{color}</span>
+                          <button
+                            type="button"
+                            aria-label={`Remove palette color ${index + 1}`}
+                            disabled={paletteColors.length <= 1}
+                            onClick={() => updatePaletteColors(paletteColors.filter((_, item) => item !== index))}
+                            className="p-1 text-studio-text-dim hover:text-white disabled:opacity-30"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={paletteColors.length >= 256}
+                        onClick={() => updatePaletteColors([...paletteColors, '#FFFFFF'])}
+                        className="flex items-center justify-center gap-1 rounded border border-studio-border py-1 text-[10px] disabled:opacity-30"
+                      >
+                        <Plus size={12} />
+                        Add color
+                      </button>
+                    </div>
+                  )}
+
+                  {paletteMode !== 'off' && (
+                    <>
+                      <label className="flex items-center gap-2 text-[10px] text-studio-text-dim">
+                        <input
+                          type="checkbox"
+                          checked={paletteDither}
+                          onChange={(event) => {
+                            setPaletteDither(event.target.checked);
+                            yPrompt?.set('paletteDither', event.target.checked);
+                          }}
+                        />
+                        Dither
+                      </label>
+                      <label className="flex items-center gap-2 text-[10px] text-studio-text-dim">
+                        <input
+                          type="checkbox"
+                          checked={preserveAlpha}
+                          onChange={(event) => {
+                            setPreserveAlpha(event.target.checked);
+                            yPrompt?.set('palettePreserveAlpha', event.target.checked);
+                          }}
+                        />
+                        Preserve transparency
+                      </label>
+                    </>
+                  )}
+                  <p className="text-[9px] leading-relaxed text-studio-text-dim">
+                    Limits are enforced on the exported image after generation.
+                  </p>
+                </div>
+              </SidebarSection>
+
               {/* Generate Button */}
               <button 
                 onClick={handleGenerate}
@@ -229,6 +390,17 @@ export const ArtControls: React.FC = () => {
               >
                 {isGenerating ? 'STOP' : 'GENERATE'}
               </button>
+              <label className="flex items-center justify-between text-[9px] font-bold uppercase text-studio-text-dim">
+                Output target
+                <select
+                  value={targetWorktree}
+                  onChange={event => setTargetWorktree(event.target.value as 'main' | 'experimental')}
+                  className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
+                >
+                  <option value="main">Main canvas</option>
+                  <option value="experimental">Experimental review</option>
+                </select>
+              </label>
             </div>
           </SidebarSection>
 
@@ -249,7 +421,7 @@ export const ArtControls: React.FC = () => {
                     {variations[i] ? (
                       <>
                         <img src={`data:image/png;base64,${variations[i]}`} className="w-full h-full object-contain" alt="" />
-                        <button onClick={() => promote(variations[i])} className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button onClick={() => promote(variations[i], variationSettings[i] || paletteSettings())} className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
                           <ThumbsUp size={14} className="text-white" />
                         </button>
                       </>

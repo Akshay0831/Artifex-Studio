@@ -149,9 +149,16 @@ function InnerApp() {
               </div>
             </div>
           )}
-          <StudioErrorBoundary key={activeExt.id}>
-            <activeExt.primaryView />
-          </StudioErrorBoundary>
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <StudioErrorBoundary key={`${activeExt.id}-controls`}>
+              <activeExt.sidebarControls />
+            </StudioErrorBoundary>
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <StudioErrorBoundary key={activeExt.id}>
+                <activeExt.primaryView />
+              </StudioErrorBoundary>
+            </div>
+          </div>
         </div>
         <ChatPanel activeExtension={activeExt} />
       </div>

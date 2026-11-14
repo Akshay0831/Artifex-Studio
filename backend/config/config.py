@@ -22,6 +22,22 @@ class Settings(BaseModel):
     CONFIGS_PATH: str = Field(default=os.getenv("CONFIGS_PATH", "./data/config"))
     OUTPUT_PATH: str = Field(default=os.getenv("OUTPUT_PATH", "./data/output"))
     MODELS_PATH: str = Field(default=os.getenv("MODELS_PATH", "./data/models"))
+    REFERENCE_MAX_UPLOAD_BYTES: int = Field(
+        default=int(os.getenv("REFERENCE_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))),
+        gt=0,
+    )
+    REFERENCE_MAX_IMAGE_DIMENSION: int = Field(
+        default=int(os.getenv("REFERENCE_MAX_IMAGE_DIMENSION", "8192")),
+        gt=0,
+    )
+    REFERENCE_MAX_IMAGE_PIXELS: int = Field(
+        default=int(os.getenv("REFERENCE_MAX_IMAGE_PIXELS", "16777216")),
+        gt=0,
+    )
+    REFERENCE_MAX_AUDIO_SECONDS: int = Field(
+        default=int(os.getenv("REFERENCE_MAX_AUDIO_SECONDS", "600")),
+        gt=0,
+    )
     
     # Remote APIs (Optional)
     REPLICATE_API_KEY: Optional[str] = Field(default=os.getenv("REPLICATE_API_KEY"))

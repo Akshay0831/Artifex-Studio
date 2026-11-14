@@ -10,7 +10,7 @@ from config_manager import config_manager, Environment
 from utils.monitoring import health_monitor
 import time
 
-router = APIRouter(prefix="/api/config", tags=["config"])
+router = APIRouter(prefix="/config", tags=["config"])
 
 # Request/Response Models
 class EnvironmentRequest(BaseModel):

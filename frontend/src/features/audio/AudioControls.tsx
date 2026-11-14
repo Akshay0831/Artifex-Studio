@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Music, Globe, FlaskConical, RefreshCw, Sparkles, Sliders } from 'lucide-react';
+import { Music, Globe, RefreshCw, Sparkles, Sliders, FolderOpen } from 'lucide-react';
 import { useStudioStore } from '../../core/useStudioStore';
 import { StudioSelect, StudioToggle } from '../../features/common/components/Controls';
 import { useAudioComposition } from '../../hooks/useAudioComposition';
@@ -7,6 +7,7 @@ import { useProjectConfig } from '../../core/useProjectConfig';
 
 import CollapsibleSidebar, { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
 import AudioToolLookup from '../../components/lookup/AudioToolLookup';
+import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
 
 export const AudioControls: React.FC = () => {
   const { yAudio } = useStudioStore();
@@ -56,6 +57,10 @@ export const AudioControls: React.FC = () => {
         className="flex-shrink-0"
       >
         <div className="p-3 space-y-4">
+          <SidebarSection title="Project References" icon={FolderOpen}>
+            <ProjectReferenceLibrary />
+          </SidebarSection>
+
           {/* Tool Selection Section */}
           <SidebarSection title="Audio Tools" icon={Sliders}>
             <AudioToolLookup
@@ -157,6 +162,17 @@ export const AudioControls: React.FC = () => {
 
           {/* Action Section */}
           <SidebarSection title="Actions" icon={Music}>
+            <label className="flex items-center justify-between text-[9px] font-bold uppercase text-studio-text-dim">
+              Output target
+              <select
+                value={targetWorktree}
+                onChange={event => setTargetWorktree(event.target.value as 'main' | 'experimental')}
+                className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
+              >
+                <option value="main">Main project</option>
+                <option value="experimental">Experimental review</option>
+              </select>
+            </label>
             <button 
               onClick={handleRecomposeAll}
               disabled={isComposing}

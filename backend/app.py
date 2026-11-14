@@ -23,6 +23,7 @@ from utils.error_handling import (
     custom_exception_handler,
     create_error_response
 )
+from utils.api_error_handler import APIError, create_error_response as create_api_error_response
 from utils.rate_limiter import rate_limit_middleware
 from utils.monitoring import LoggingMiddleware, health_monitor, REQUESTS_CACHE
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +58,11 @@ app.add_middleware(LoggingMiddleware)
 
 # Add global error handler
 app.add_exception_handler(Exception, custom_exception_handler)
+
+async def api_error_exception_handler(request: Request, exc: APIError):
+    return create_api_error_response(exc)
+
+app.add_exception_handler(APIError, api_error_exception_handler)
 
 # CORS Configuration
 app.add_middleware(
@@ -108,6 +114,8 @@ app.mount("/output", StaticFiles(directory=settings.OUTPUT_PATH), name="output")
 
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = STUDIO_ROOT / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
+FRONTEND_ASSETS = FRONTEND_DIST / "assets"
 
 start_time = time.time()
 
@@ -159,18 +167,18 @@ async def get_recent_requests(limit: int = 20):
     }
 
 
-if FRONTEND_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="frontend_assets")
+if FRONTEND_INDEX.is_file() and FRONTEND_ASSETS.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS)), name="frontend_assets")
 
     @app.get("/", include_in_schema=False)
     async def serve_frontend_root():
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(FRONTEND_INDEX)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend_spa(request: Request, full_path: str):
         if full_path.startswith("api/") or full_path.startswith("output/") or full_path == "ws" or "." in full_path:
             raise HTTPException(status_code=404, detail="Not found")
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(FRONTEND_INDEX)
 else:
     @app.get("/")
     async def frontend_status():

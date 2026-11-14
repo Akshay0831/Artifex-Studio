@@ -2,7 +2,9 @@ import requests
 import json
 import time
 import logging
-from typing import Dict, Any, Optional, List
+import threading
+from collections import deque
+from typing import Deque, Dict, Any, Optional, List
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -18,8 +20,9 @@ class ApiService:
     """Service to handle API key validation and generation requests"""
     
     def __init__(self):
-        self.rate_limits = {}  # Track rate limits per profile
-        self.last_requests = {}  # Track last request times per profile
+        self.rate_limits: Dict[str, Deque[float]] = {}
+        self.rate_limit_lock = threading.Lock()
+        self.requests_per_minute = 60
         self.api_configs = {
             'replicate': {
                 'base_url': 'https://api.replicate.com/v1',
@@ -123,35 +126,34 @@ class ApiService:
     
     def check_rate_limit(self, profile_id: str) -> bool:
         """Check if rate limit allows another request"""
-        if profile_id not in self.rate_limits:
-            self.rate_limits[profile_id] = {
-                'requests_this_minute': 0,
-                'requests_this_hour': 0,
-                'reset_time_minute': datetime.now(timezone.utc),
-                'reset_time_hour': datetime.now(timezone.utc)
-            }
-        
-        rate_limit = self.rate_limits[profile_id]
-        now = datetime.now(timezone.utc)
-        
-        # Reset minute counter if needed
-        if now >= rate_limit['reset_time_minute']:
-            rate_limit['requests_this_minute'] = 0
-            rate_limit['reset_time_minute'] = now.replace(second=0, microsecond=0) + timezone.utc
-        
-        # Reset hour counter if needed  
-        if now >= rate_limit['reset_time_hour']:
-            rate_limit['requests_this_hour'] = 0
-            rate_limit['reset_time_hour'] = now.replace(minute=0, second=0, microsecond=0) + timezone.utc
-        
-        return rate_limit['requests_this_minute'] < 60
+        now = time.monotonic()
+        with self.rate_limit_lock:
+            requests = self._get_recent_requests(profile_id, now)
+            return len(requests) < self.requests_per_minute
     
     def increment_rate_limit(self, profile_id: str):
         """Increment rate limit counter"""
-        if profile_id in self.rate_limits:
-            self.rate_limits[profile_id]['requests_this_minute'] += 1
-            self.rate_limits[profile_id]['requests_this_hour'] += 1
-            self.last_requests[profile_id] = datetime.now(timezone.utc)
+        now = time.monotonic()
+        with self.rate_limit_lock:
+            self._get_recent_requests(profile_id, now).append(now)
+
+    def _consume_rate_limit(self, profile_id: str) -> bool:
+        """Atomically check and record a request against the sliding window."""
+        now = time.monotonic()
+        with self.rate_limit_lock:
+            requests = self._get_recent_requests(profile_id, now)
+            if len(requests) >= self.requests_per_minute:
+                return False
+            requests.append(now)
+            return True
+
+    def _get_recent_requests(self, profile_id: str, now: float) -> Deque[float]:
+        """Return a profile's mutable request bucket with expired entries removed."""
+        requests = self.rate_limits.setdefault(profile_id, deque())
+        cutoff = now - 60
+        while requests and requests[0] <= cutoff:
+            requests.popleft()
+        return requests
     
     async def generate_image(self, profile_id: str, model: str, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate image using selected API profile"""
@@ -197,16 +199,12 @@ class ApiService:
     
     async def make_generation_request(self, profile_id: str, model: str, prompt: str, generation_type: str, **kwargs) -> Dict[str, Any]:
         """Make a generation request using the selected profile"""
-        # Check rate limit
-        if not self.check_rate_limit(profile_id):
+        if not self._consume_rate_limit(profile_id):
             return {
                 'status': 'error',
                 'message': 'Rate limit exceeded. Please try again later.',
                 'error_code': 'rate_limited'
             }
-        
-        # Increment rate limit
-        self.increment_rate_limit(profile_id)
         
         # Route to appropriate generation method
         if generation_type == 'image':
@@ -243,12 +241,7 @@ class ApiService:
                     'config': config
                 })
         else:
-            # For APIs without detailed model configs, return basic info
-            models.append({
-                'id': model,
-                'type': 'unknown',
-                'name': model.replace('-', ' ').title()
-            })
+            return []
         
         return models
     

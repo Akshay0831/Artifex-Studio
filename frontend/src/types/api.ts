@@ -80,3 +80,71 @@ export interface GenerationResponse {
     [key: string]: any
   }
 }
+
+export type ReferenceRole = 'style' | 'composition' | 'subject' | 'palette'
+export type PaletteMode = 'off' | 'extract' | 'fixed' | 'maximum'
+
+export interface ImagePaletteSettings {
+  mode: PaletteMode
+  colors: string[]
+  max_colors: number | null
+  dither: boolean
+  preserve_alpha: boolean
+}
+
+export interface ArtGenerationRequest {
+  prompt: string
+  negative_prompt?: string
+  seed?: number
+  config?: Record<string, unknown>
+  palette?: ImagePaletteSettings
+  prefer_local?: boolean
+}
+
+export interface ImageGenerationResult {
+  image_base64: string
+  seed: number
+  backend: string
+  metadata?: Record<string, unknown> | null
+  palette?: {
+    mode: PaletteMode
+    max_colors?: number | null
+    colors: string[]
+    opaque_color_count: number | null
+    alpha_preserved: boolean
+    dither: boolean
+  } | null
+}
+
+export interface StudioProject {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  config: Record<string, unknown>
+  created_at: number
+  updated_at: number
+}
+
+export interface ProjectReference {
+  id: string
+  project_id: string
+  original_filename: string
+  media_type: 'image' | 'audio'
+  media_format: string
+  size_bytes: number
+  sha256: string
+  role: ReferenceRole | null
+  source: string | null
+  media_info: {
+    content_type: string
+    format: string
+    width?: number
+    height?: number
+    duration_seconds?: number
+    sample_rate?: number
+    channels?: number
+    frames?: number
+  }
+  created_at: number
+}

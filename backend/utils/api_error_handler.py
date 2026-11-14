@@ -20,7 +20,7 @@ class APIErrorTypes:
     MODEL_NOT_AVAILABLE = "model_not_available"
     INVALID_REQUEST = "invalid_request"
 
-class APIError:
+class APIError(Exception):
     """Standardized API error format"""
     
     def __init__(
@@ -37,6 +37,7 @@ class APIError:
         self.status_code = status_code
         self.additional_data = additional_data or {}
         self.timestamp = datetime.now().isoformat()
+        super().__init__(message)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert error to dictionary format"""
@@ -135,12 +136,16 @@ def handle_rate_limit_error(profile_id: str, limit_type: str = "minute") -> APIE
         }
     )
 
-def handle_model_not_available_error(model: str, provider: str) -> APIError:
+def handle_model_not_available_error(
+    model: str,
+    provider: str,
+    detail: Optional[str] = None
+) -> APIError:
     """Handle model not available errors"""
     return APIError(
         error_type=APIErrorTypes.MODEL_NOT_AVAILABLE,
         message="Requested model is not available",
-        detail=f"Model '{model}' is not available for provider '{provider}'",
+        detail=detail or f"Model '{model}' is not available for provider '{provider}'",
         status_code=400,
         additional_data={
             "model": model,

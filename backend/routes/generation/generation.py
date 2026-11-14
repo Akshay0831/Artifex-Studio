@@ -1,17 +1,19 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-import json
+from typing import Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 from services.api_service import api_service
 from utils.dependency_manager import get_current_user
-from routes.api_management.api_management import profiles_db
-from utils.api_error_handler import handle_rate_limit_error
-from utils.rate_limiter import rate_limiter
+from routes.api_management.api_management import (
+    check_profile_rate_limit,
+    profiles_db,
+)
+
 logger = logging.getLogger("studio.backend.routes.generation")
 
-router = APIRouter(prefix="/api/generation", tags=["generation"])
+router = APIRouter(prefix="/generation", tags=["generation"])
 
 class GenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1000)
@@ -19,6 +21,7 @@ class GenerationRequest(BaseModel):
     api_profile_id: Optional[str] = None
     negative_prompt: Optional[str] = Field(None, max_length=500)
     steps: Optional[int] = Field(None, ge=1, le=100)
+    cfg: Optional[float] = Field(None, ge=0, le=30)
     size: Optional[str] = Field(None, pattern=r'^\d+x\d+$')
     batch_size: Optional[int] = Field(None, ge=1, le=10)
     seed: Optional[int] = Field(None, ge=0, le=4294967295)
@@ -36,10 +39,13 @@ class GenerationResponse(BaseModel):
     prompt: str
     timestamp: str
 
-@router.post("/generate")
-async def generate_content(request: GenerationRequest, current_user = Depends(get_current_user)):
+@router.post("/generate", response_model=GenerationResponse)
+async def generate_content(
+    request: GenerationRequest,
+    current_user=Depends(get_current_user),
+) -> GenerationResponse:
     """Generate content using selected API profile"""
-    
+
     # Validate API profile if provided
     if request.api_profile_id:
         if request.api_profile_id not in profiles_db:
@@ -59,21 +65,23 @@ async def generate_content(request: GenerationRequest, current_user = Depends(ge
         check_profile_rate_limit(request.api_profile_id, profile['rate_limit'])
         
         api_profile_id = request.api_profile_id
+        profile = profiles_db[api_profile_id]
     else:
-        # If no profile specified, try to find an active one
-        active_profiles = [p for p in profiles_db.values() if p['is_active']]
-        if not active_profiles:
+        selected_profile = next(
+            (profile for profile in profiles_db.values() if profile["is_active"]),
+            None,
+        )
+        if selected_profile is None:
             raise HTTPException(
                 status_code=400,
                 detail="No active API profiles available. Please add an API profile."
             )
-        
-        # Use first active profile
-        api_profile_id = list(active_profiles)[0]['id']
-        
-        # Check rate limit
-        check_profile_rate_limit(api_profile_id, active_profiles[0]['rate_limit'])
-    
+
+        api_profile_id = selected_profile["id"]
+        profile = selected_profile
+
+    check_profile_rate_limit(api_profile_id, profile["rate_limit"])
+
     # Prepare generation parameters
     generation_params = {
         'profile_id': api_profile_id,
@@ -83,39 +91,81 @@ async def generate_content(request: GenerationRequest, current_user = Depends(ge
     }
     
     # Add optional parameters
-    if request.steps:
+    if request.negative_prompt is not None:
+        generation_params['negative_prompt'] = request.negative_prompt
+    if request.steps is not None:
         generation_params['steps'] = request.steps
-    if request.size:
+    if request.cfg is not None:
+        generation_params['cfg'] = request.cfg
+    if request.size is not None:
         generation_params['size'] = request.size
-    if request.batch_size:
+    if request.batch_size is not None:
         generation_params['batch_size'] = request.batch_size
-    if request.seed:
+    if request.seed is not None:
         generation_params['seed'] = request.seed
     
     # Make the generation request
     try:
         result = await api_service.make_generation_request(**generation_params)
-        
+
+        if not isinstance(result, dict):
+            logger.error("Generation service returned an invalid response")
+            raise HTTPException(
+                status_code=502,
+                detail="Generation provider returned an invalid response",
+            )
+
+        error_code = result.get("error_code")
+        status = result.get("status")
+        if error_code == "rate_limited":
+            raise HTTPException(
+                status_code=429,
+                detail="Generation provider rate limit exceeded",
+            )
+        if result.get("error") or status in {"error", "failed"}:
+            logger.warning(
+                "Generation service failed for profile %s with status %s",
+                api_profile_id,
+                status,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Generation provider request failed",
+            )
+        if status not in {"pending", "processing", "completed"}:
+            logger.error("Generation service returned an unsupported status: %r", status)
+            raise HTTPException(
+                status_code=502,
+                detail="Generation provider returned an invalid status",
+            )
+
         # Update usage stats for the profile
         if api_profile_id in profiles_db:
             profiles_db[api_profile_id]['usage_count'] += 1
-            profiles_db[api_profile_id]['last_used'] = datetime.now()
-        
+            profiles_db[api_profile_id]['last_used'] = datetime.now(timezone.utc)
+
         return GenerationResponse(
-            id=result.get('id', f"gen_{int(datetime.now().timestamp())}"),
-            status=result.get('status', 'completed'),
+            id=result.get('id') or f"gen_{uuid4()}",
+            status=status,
             result=result.get('result'),
-            error=result.get('error'),
-            progress=100 if result.get('status') == 'completed' else 0,
+            progress=result.get(
+                'progress',
+                100 if status == 'completed' else 0,
+            ),
             api_profile_id=api_profile_id,
             model=request.model,
             prompt=request.prompt,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        logger.exception("Generation provider request failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Generation provider request failed",
+        ) from e
 
 @router.get("/models")
 async def get_available_models(api_type: str, current_user = Depends(get_current_user)):

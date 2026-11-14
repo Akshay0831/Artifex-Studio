@@ -24,28 +24,26 @@ class RateLimiter:
         now = time.time()
         window_start = now - window_seconds
 
-        # Clean up old requests periodically
-        if now - self.last_cleanup > self.cleanup_interval:
-            self._cleanup_old_requests()
-            self.last_cleanup = now
-
         with self.lock:
+            # Clean up old requests periodically while holding the same lock
+            # used to read and update the request buckets.
+            if now - self.last_cleanup > self.cleanup_interval:
+                self._cleanup_old_requests()
+                self.last_cleanup = now
+
             # Remove expired requests
-            if key in self.requests:
-                self.requests[key] = [
-                    t for t in self.requests[key]
-                    if t > window_start
-                ]
+            requests = self.requests.setdefault(key, [])
+            requests[:] = [timestamp for timestamp in requests if timestamp > window_start]
 
             # Check if limit exceeded
-            if len(self.requests[key]) >= max_requests:
+            if len(requests) >= max_requests:
                 return False, 0
 
             # Add current request
-            self.requests[key].append(now)
+            requests.append(now)
 
             # Calculate remaining requests
-            remaining = max_requests - len(self.requests[key])
+            remaining = max_requests - len(requests)
 
             return True, remaining
 

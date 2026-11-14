@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useStudioStore } from '../core/useStudioStore';
+import type { ImagePaletteSettings } from '../types/api';
 
 export const useArtGeneration = () => {
   const { sendMessage, lastMessage, yPrompt } = useStudioStore();
@@ -7,23 +8,40 @@ export const useArtGeneration = () => {
   const [variations, setVariations] = useState<string[]>([]);
   const [numVariations, setNumVariations] = useState(4);
   const [model, setModel] = useState('sdxl');
+  const [variationSettings, setVariationSettings] = useState<ImagePaletteSettings[]>([]);
 
   const [progress, setProgress] = useState(0);
 
-  const generate = useCallback((prompt: string, seed: number, steps: number, count: number, worktree: string = 'main') => {
+  const generate = useCallback((
+    prompt: string,
+    seed: number,
+    steps: number,
+    count: number,
+    palette: ImagePaletteSettings,
+    worktree: string = 'main',
+  ) => {
     setIsGenerating(true);
     setProgress(0);
     setVariations(new Array(count).fill(''));
+    setVariationSettings(new Array(count).fill(palette));
 
     // Extract all config from yPrompt
     const config: any = { steps, model };
+    const paletteStateKeys = new Set([
+      'paletteMode',
+      'paletteMaxColors',
+      'paletteColors',
+      'paletteDither',
+      'palettePreserveAlpha',
+    ]);
     if (yPrompt) {
       yPrompt.forEach((val, key) => {
-        if (!['currentPrompt', 'currentSeed'].includes(key)) {
+        if (!['currentPrompt', 'currentSeed'].includes(key) && !paletteStateKeys.has(key)) {
           config[key] = val;
         }
       });
     }
+    config.palette = palette;
 
     sendMessage({
       type: 'generate_image',
@@ -73,6 +91,7 @@ export const useArtGeneration = () => {
     isGenerating,
     progress,
     variations,
+    variationSettings,
     generate,
     cancel,
     numVariations,

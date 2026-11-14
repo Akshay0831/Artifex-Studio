@@ -8,6 +8,8 @@ from inference_dispatcher import dispatcher
 from utils.telemetry import trace_performance
 from utils.cache import generation_cache
 from utils.encoding import pil_to_base64, base64_to_pil
+from models.request_schemas import ImagePaletteSettings
+from services.palette_service import palette_service
 
 # Use our real AI implementations instead of mocks
 from ai_models.model_manager import ModelManager, get_model_manager
@@ -68,6 +70,12 @@ class ArtService(BaseStudioService):
         stream_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """Generates an image using the diffusion pipeline."""
+        palette_settings = ImagePaletteSettings.model_validate(
+            gen_config.get("palette", {})
+        )
+        if "palette" in gen_config:
+            gen_config = {**gen_config, "palette": palette_settings.model_dump()}
+
         cached_result = generation_cache.get(prompt, seed, gen_config)
         if cached_result:
             if stream_callback:
@@ -94,6 +102,7 @@ class ArtService(BaseStudioService):
             # but we can wrap it if we want simulated progress for non-callback pipelines
             result = await self._generate_local(prompt, seed, gen_config, model_type, stream_callback)
             
+            result = self._apply_palette(result, palette_settings)
             if result and "error" not in result:
                 generation_cache.set(prompt, seed, gen_config, result)
             return result
@@ -107,9 +116,32 @@ class ArtService(BaseStudioService):
                 "api_type": current_profile.api_type,
                 "model": gen_config.get("model", current_profile.default_model)
             }
-            return await self._generate_api(api_config, stream_callback)
+            result = await self._generate_api(api_config, stream_callback)
+            result = self._apply_palette(result, palette_settings)
+            if result and "error" not in result:
+                generation_cache.set(prompt, seed, gen_config, result)
+            return result
         else:
             return {"error": "Non-local GPU generation not yet optimized in service layer", "routing": routing}
+
+    @staticmethod
+    def _apply_palette(
+        result: Dict[str, Any],
+        palette_settings: ImagePaletteSettings,
+    ) -> Dict[str, Any]:
+        if not result or "error" in result or palette_settings.mode == "off":
+            return result
+        image_base64 = result.get("image_base64")
+        if not image_base64:
+            raise ValueError("Image generation returned no image to apply the palette to")
+        processed_image, palette_metadata = palette_service.apply(
+            image_base64, palette_settings
+        )
+        return {
+            **result,
+            "image_base64": processed_image,
+            "palette": palette_metadata,
+        }
 
     @trace_performance("inpaint_image")
     async def inpaint(
@@ -168,21 +200,29 @@ class ArtService(BaseStudioService):
         stream_callback: Optional[Callable] = None
     ) -> List[Dict[str, Any]]:
         """Generates a batch of images for the same prompt with different seeds."""
-        results = []
+        palette_settings = ImagePaletteSettings.model_validate(
+            gen_config.get("palette", {})
+        )
+        if "palette" in gen_config:
+            gen_config = {**gen_config, "palette": palette_settings.model_dump()}
+
+        results: List[Optional[Dict[str, Any]]] = [None] * len(seeds)
         seeds_to_generate = []
+        generation_indices = []
         
-        for seed in seeds:
+        for index, seed in enumerate(seeds):
             cached = generation_cache.get(prompt, seed, gen_config)
             if cached:
-                results.append(cached)
+                results[index] = cached
             else:
                 seeds_to_generate.append(seed)
+                generation_indices.append(index)
         
         if not seeds_to_generate:
             if stream_callback:
                 steps = gen_config.get("steps", 30)
                 await stream_callback({"step": steps, "total_steps": steps, "progress": 100})
-            return results
+            return [result for result in results if result is not None]
 
         logger.info(f"Generating batch of {len(seeds_to_generate)} images | Prompt: {prompt[:50]}...")
         
@@ -197,12 +237,16 @@ class ArtService(BaseStudioService):
             batch_results = []
             for seed in seeds_to_generate:
                 batch_results.append(await self._generate_cpu(prompt, seed, gen_config))
-        
-        for i, res in enumerate(batch_results):
-            generation_cache.set(prompt, seeds_to_generate[i], gen_config, res)
-            results.append(res)
-            
-        return results
+
+        if len(batch_results) != len(seeds_to_generate):
+            raise RuntimeError("Image batch returned an unexpected number of results")
+
+        for index, seed, result in zip(generation_indices, seeds_to_generate, batch_results):
+            result = self._apply_palette(result, palette_settings)
+            generation_cache.set(prompt, seed, gen_config, result)
+            results[index] = result
+
+        return [result for result in results if result is not None]
 
     @trace_performance("local_gpu_batch_generation")
     async def _generate_batch_local(
@@ -415,8 +459,6 @@ class ArtService(BaseStudioService):
             else:
                 return {"error": f"Unsupported API type: {api_type}"}
             
-            if result and "error" not in result:
-                generation_cache.set(prompt, seed, gen_config, result)
             return result
             
         except Exception as e:

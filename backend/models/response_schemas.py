@@ -2,10 +2,11 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
 class ImageResponse(BaseModel):
-    image_b64: str
+    image_base64: str
     seed: int
     backend: str
     metadata: Optional[Dict[str, Any]] = None
+    palette: Optional[Dict[str, Any]] = None
 
 class AudioResponse(BaseModel):
     composition: Dict[str, Any]

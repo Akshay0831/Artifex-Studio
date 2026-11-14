@@ -1,4 +1,11 @@
 import axios from 'axios';
+import type {
+  ArtGenerationRequest,
+  ImageGenerationResult,
+  ProjectReference,
+  ReferenceRole,
+  StudioProject,
+} from '../types/api';
 
 const API_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:8000' 
@@ -12,6 +19,19 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const projectsClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+});
+
+projectsClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('Project API Error:', error.response?.data || error.message);
+    return Promise.reject(error);
+  },
+);
 
 // Request interceptor for logging
 api.interceptors.request.use(
@@ -102,13 +122,63 @@ export const enhancedApi = {
 // Art API
 export const artApi = {
   getHealth: () => api.get('/api/art/health').catch(() => ({ status: 'ok' })),
-  generateImage: (data: any) => api.post('/api/art/generate', data),
+  generateImage: (data: ArtGenerationRequest) =>
+    api.post<ImageGenerationResult>('/api/art/generate', data),
   getGenerationHistory: () => api.get('/api/art/history'),
   getGenerationStatus: (id: string) => api.get(`/api/art/status/${id}`),
   cancelGeneration: (id: string) => api.post(`/api/art/cancel/${id}`),
   saveImage: (data: any) => api.post('/api/art/save', data),
   loadImage: (id: string) => api.get(`/api/art/load/${id}`),
   deleteImage: (id: string) => api.delete(`/api/art/delete/${id}`),
+};
+
+// Project metadata and reference assets
+export const projectsApi = {
+  list: async () =>
+    (await projectsClient.get<{ projects: StudioProject[]; total: number }>('/api/projects')).data,
+  get: async (projectId: string) =>
+    (await projectsClient.get<StudioProject>(`/api/projects/${projectId}`)).data,
+  create: async (data: Omit<StudioProject, 'id' | 'created_at' | 'updated_at'>) =>
+    (await projectsClient.post<StudioProject>('/api/projects', data)).data,
+  update: async (
+    projectId: string,
+    data: Omit<StudioProject, 'id' | 'created_at' | 'updated_at'>,
+  ) =>
+    (await projectsClient.put<StudioProject>(`/api/projects/${projectId}`, data)).data,
+  delete: async (projectId: string) =>
+    (await projectsClient.delete(`/api/projects/${projectId}`)).data,
+  listReferences: async (projectId: string) =>
+    (await projectsClient.get<{ references: ProjectReference[]; total: number }>(
+      `/api/projects/${projectId}/references`,
+    )).data,
+  uploadReference: async (
+    projectId: string,
+    file: File,
+    role?: ReferenceRole,
+    source?: string,
+  ) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (role) form.append('role', role);
+    if (source) form.append('source', source);
+    return (await projectsClient.post<ProjectReference>(
+      `/api/projects/${projectId}/references`,
+      form,
+    )).data;
+  },
+  getReference: async (projectId: string, referenceId: string) =>
+    (await projectsClient.get<ProjectReference>(
+      `/api/projects/${projectId}/references/${referenceId}`,
+    )).data,
+  getReferenceContent: async (projectId: string, referenceId: string) =>
+    (await projectsClient.get<Blob>(
+      `/api/projects/${projectId}/references/${referenceId}/content`,
+      { responseType: 'blob' },
+    )).data,
+  referenceContentUrl: (projectId: string, referenceId: string) =>
+    `${API_BASE_URL}/api/projects/${projectId}/references/${referenceId}/content`,
+  deleteReference: async (projectId: string, referenceId: string) =>
+    (await projectsClient.delete(`/api/projects/${projectId}/references/${referenceId}`)).data,
 };
 
 // Audio API

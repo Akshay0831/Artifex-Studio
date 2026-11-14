@@ -4,11 +4,11 @@ from typing import Dict, Any, List
 import time
 import uuid
 from pathlib import Path
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.config import Settings
-settings = Settings()
+from config.config import settings
+from services.project_asset_service import (
+    ProjectNotFoundError,
+    project_asset_service,
+)
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -128,23 +128,19 @@ async def apply_template(template_id: str, project_id: str):
     """Apply template to a project"""
     if template_id not in templates_db:
         raise HTTPException(status_code=404, detail="Template not found")
-    
-    # Get project details (would normally get from project service)
-    project_dir = Path(settings.PROJECTS_PATH) / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+
+    try:
+        project_asset_service.get_project(project_id)
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+
     template = templates_db[template_id]
-    
-    # Apply template configuration to project
-    config_file = project_dir / "config.json"
     template_config = template.config
-    
-    # Save template configuration to project
-    with open(config_file, 'w') as f:
-        import json
-        json.dump(template_config, f, indent=2)
-    
+    try:
+        project_asset_service.update_project_config(project_id, template_config)
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+
     return {
         "message": "Template applied successfully",
         "template_id": template_id,
