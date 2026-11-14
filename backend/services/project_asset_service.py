@@ -7,8 +7,10 @@ import shutil
 import sqlite3
 import tempfile
 import time
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -39,6 +41,10 @@ class ReferenceProcessingUnavailableError(RuntimeError):
     pass
 
 
+class ProjectBundleInvalidError(ValueError):
+    pass
+
+
 class ProjectAssetService:
     """Persists project metadata in SQLite and immutable media in project folders."""
 
@@ -54,6 +60,7 @@ class ProjectAssetService:
         "AIFF": ("audio/aiff", "aiff"),
     }
     REFERENCE_ROLES = {"style", "composition", "subject", "palette"}
+    MAX_BUNDLE_REFERENCES = 1000
 
     def __init__(
         self,
@@ -62,6 +69,7 @@ class ProjectAssetService:
         max_image_dimension: int = 8192,
         max_image_pixels: int = 16_777_216,
         max_audio_seconds: int = 600,
+        max_bundle_bytes: int = 512 * 1024 * 1024,
     ):
         self.root = Path(projects_path).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -70,6 +78,7 @@ class ProjectAssetService:
         self.max_image_dimension = max_image_dimension
         self.max_image_pixels = max_image_pixels
         self.max_audio_seconds = max_audio_seconds
+        self.max_bundle_bytes = max_bundle_bytes
         self._initialize_database()
         self._recover_pending_deletions()
 
@@ -702,6 +711,200 @@ class ProjectAssetService:
             raise
         self._purge_trash(trash_path)
 
+    def export_project_bundle(self, project_id: str) -> bytes:
+        project = self.get_project(project_id)
+        references = self.list_references(project_id)
+        if len(references) > self.MAX_BUNDLE_REFERENCES:
+            raise ProjectBundleInvalidError("Project contains too many references to bundle")
+        bundle_manifest = {
+            "format_version": 1,
+            "project": project,
+            "references": references,
+        }
+        manifest_data = json.dumps(
+            bundle_manifest, ensure_ascii=False, indent=2
+        ).encode("utf-8")
+        uncompressed_size = len(manifest_data) + sum(
+            reference["size_bytes"] for reference in references
+        )
+        if uncompressed_size > self.max_bundle_bytes:
+            raise ProjectBundleInvalidError("Project bundle exceeds the configured size limit")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", manifest_data)
+            for reference in references:
+                content_path = self.reference_content_path(project_id, reference["id"])
+                archive.write(
+                    content_path,
+                    f"references/{reference['id']}/{content_path.name}",
+                )
+        bundle = buffer.getvalue()
+        if len(bundle) > self.max_bundle_bytes:
+            raise ProjectBundleInvalidError("Project bundle exceeds the configured size limit")
+        return bundle
+
+    def import_project_bundle(self, bundle: bytes) -> Dict[str, Any]:
+        if not bundle or len(bundle) > self.max_bundle_bytes:
+            raise ProjectBundleInvalidError("Project bundle is empty or exceeds the size limit")
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(bundle))
+        except (OSError, zipfile.BadZipFile) as error:
+            raise ProjectBundleInvalidError("Project bundle is not a valid ZIP archive") from error
+
+        with archive:
+            entries = archive.infolist()
+            if not entries or len(entries) > self.MAX_BUNDLE_REFERENCES + 1:
+                raise ProjectBundleInvalidError("Project bundle contains an invalid number of files")
+            names = set()
+            total_uncompressed_bytes = 0
+            for entry in entries:
+                path = PurePosixPath(entry.filename)
+                mode = entry.external_attr >> 16
+                if (
+                    entry.filename in names
+                    or path.is_absolute()
+                    or "\\" in entry.filename
+                    or ".." in path.parts
+                    or entry.is_dir()
+                    or (mode & 0o170000) == 0o120000
+                    or entry.flag_bits & 0x1
+                ):
+                    raise ProjectBundleInvalidError("Project bundle contains an unsafe or duplicate path")
+                names.add(entry.filename)
+                total_uncompressed_bytes += entry.file_size
+                if total_uncompressed_bytes > self.max_bundle_bytes:
+                    raise ProjectBundleInvalidError("Project bundle expands beyond the configured size limit")
+
+            if "manifest.json" not in names:
+                raise ProjectBundleInvalidError("Project bundle is missing manifest.json")
+            manifest_info = archive.getinfo("manifest.json")
+            if manifest_info.file_size > 4 * 1024 * 1024:
+                raise ProjectBundleInvalidError("Project bundle manifest is too large")
+            try:
+                manifest_data = archive.read("manifest.json")
+                manifest = json.loads(manifest_data)
+            except (KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as error:
+                raise ProjectBundleInvalidError("Project bundle manifest is invalid") from error
+
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("format_version") != 1
+                or not isinstance(manifest.get("project"), dict)
+                or not isinstance(manifest.get("references"), list)
+            ):
+                raise ProjectBundleInvalidError("Project bundle manifest has an unsupported format")
+            project = manifest["project"]
+            if (
+                not isinstance(project.get("name"), str)
+                or not project["name"].strip()
+                or not isinstance(project.get("description", ""), str)
+                or not isinstance(project.get("tags", []), list)
+                or not all(isinstance(tag, str) for tag in project.get("tags", []))
+                or not isinstance(project.get("config", {}), dict)
+            ):
+                raise ProjectBundleInvalidError("Project metadata in the bundle is invalid")
+            references = manifest["references"]
+            if len(references) > self.MAX_BUNDLE_REFERENCES:
+                raise ProjectBundleInvalidError("Project bundle contains too many references")
+
+            content_entries = names - {"manifest.json"}
+            reference_payloads = []
+            expected_entries = set()
+            reference_ids = set()
+            image_extensions = {
+                extension for _, extension in self.IMAGE_FORMATS.values()
+            }
+            audio_extensions = {
+                extension for _, extension in self.AUDIO_FORMATS.values()
+            }
+            for reference in references:
+                if not isinstance(reference, dict):
+                    raise ProjectBundleInvalidError("Reference metadata in the bundle is invalid")
+                try:
+                    reference_id = str(UUID(reference["id"]))
+                    if not isinstance(reference["media_format"], str):
+                        raise ValueError
+                    media_format = reference["media_format"].lower()
+                    if not isinstance(reference["original_filename"], str):
+                        raise ValueError
+                    original_filename = self._safe_original_filename(reference["original_filename"])
+                    media_type = reference["media_type"]
+                    role = reference.get("role")
+                    source = reference.get("source")
+                    expected_size = reference["size_bytes"]
+                    expected_sha256 = reference["sha256"]
+                    if (
+                        media_type not in {"image", "audio"}
+                        or role is not None and role not in self.REFERENCE_ROLES
+                        or source is not None and (not isinstance(source, str) or len(source) > 500)
+                        or not isinstance(expected_size, int)
+                        or isinstance(expected_size, bool)
+                        or expected_size <= 0
+                        or expected_size > self.max_upload_bytes
+                        or not isinstance(expected_sha256, str)
+                        or len(expected_sha256) != 64
+                        or any(character not in "0123456789abcdef" for character in expected_sha256.lower())
+                    ):
+                        raise ValueError
+                except (KeyError, TypeError, ValueError) as error:
+                    raise ProjectBundleInvalidError("Reference metadata in the bundle is invalid") from error
+
+                valid_extensions = (
+                    image_extensions if media_type == "image" else audio_extensions
+                )
+                if media_format not in valid_extensions or reference_id in reference_ids:
+                    raise ProjectBundleInvalidError("Reference format in the bundle is unsupported")
+                reference_ids.add(reference_id)
+                archive_name = f"references/{reference_id}/original.{media_format}"
+                expected_entries.add(archive_name)
+                if archive_name not in names:
+                    raise ProjectBundleInvalidError("Project bundle is missing reference content")
+                if archive.getinfo(archive_name).file_size != expected_size:
+                    raise ProjectBundleInvalidError("Reference content size does not match the manifest")
+                try:
+                    data = archive.read(archive_name)
+                except (KeyError, zipfile.BadZipFile) as error:
+                    raise ProjectBundleInvalidError("Reference content in the bundle is corrupt") from error
+                if (
+                    len(data) != expected_size
+                    or hashlib.sha256(data).hexdigest() != expected_sha256
+                ):
+                    raise ProjectBundleInvalidError("Reference content checksum does not match the manifest")
+                reference_payloads.append((original_filename, data, role, source))
+
+            if expected_entries != content_entries:
+                raise ProjectBundleInvalidError("Project bundle contains unexpected files")
+
+        created_project = self.create_project(
+            project["name"],
+            project.get("description", ""),
+            project.get("tags", []),
+            project.get("config", {}),
+        )
+        try:
+            for filename, data, role, source in reference_payloads:
+                self.create_reference(
+                    created_project["id"],
+                    filename,
+                    data,
+                    role=role,
+                    source=source,
+                )
+        except Exception as error:
+            try:
+                self.delete_project(created_project["id"])
+            except Exception as cleanup_error:
+                logger.exception("Could not clean up incomplete imported project %s", created_project["id"])
+                raise RuntimeError(
+                    "Project import failed and partial-project cleanup was incomplete"
+                ) from cleanup_error
+            if isinstance(error, (ReferenceTooLargeError, UnsupportedReferenceError)):
+                raise ProjectBundleInvalidError(
+                    "Project bundle contains invalid or unsupported reference content"
+                ) from error
+            raise
+        return self.get_project(created_project["id"])
+
 
 def create_project_asset_service(settings: Any) -> ProjectAssetService:
     return ProjectAssetService(
@@ -710,6 +913,7 @@ def create_project_asset_service(settings: Any) -> ProjectAssetService:
         max_image_dimension=settings.REFERENCE_MAX_IMAGE_DIMENSION,
         max_image_pixels=settings.REFERENCE_MAX_IMAGE_PIXELS,
         max_audio_seconds=settings.REFERENCE_MAX_AUDIO_SECONDS,
+        max_bundle_bytes=settings.PROJECT_BUNDLE_MAX_BYTES,
     )
 
 

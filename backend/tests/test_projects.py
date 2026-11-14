@@ -1,9 +1,11 @@
 import hashlib
 import io
 import json
+import zipfile
 from uuid import uuid4
 
 import numpy as np
+import pytest
 import soundfile
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -164,3 +166,150 @@ def test_reference_upload_rejects_unsupported_and_oversized_content(tmp_path, mo
 
     assert oversized.status_code == 413
     assert unsupported.status_code == 415
+
+
+def test_project_bundle_round_trip_preserves_metadata_and_original_reference(tmp_path):
+    service = ProjectAssetService(tmp_path)
+    project = service.create_project(
+        "Portable project",
+        "Bundle test",
+        ["sprites"],
+        {"canvas": {"width": 64}},
+    )
+    original = image_bytes()
+    reference = service.create_reference(
+        project["id"],
+        "reference.png",
+        original,
+        role="palette",
+        source="artist-provided",
+    )
+
+    bundle = service.export_project_bundle(project["id"])
+    restored_service = ProjectAssetService(tmp_path / "restored")
+    restored = restored_service.import_project_bundle(bundle)
+    restored_reference = restored_service.list_references(restored["id"])[0]
+
+    assert restored["id"] != project["id"]
+    assert restored["name"] == project["name"]
+    assert restored["description"] == project["description"]
+    assert restored["tags"] == project["tags"]
+    assert restored["config"] == project["config"]
+    assert restored_reference["id"] != reference["id"]
+    assert restored_reference["sha256"] == reference["sha256"]
+    assert restored_service.reference_content_path(
+        restored["id"], restored_reference["id"]
+    ).read_bytes() == original
+
+
+def test_project_bundle_rejects_unsafe_paths_before_creating_a_project(tmp_path):
+    service = ProjectAssetService(tmp_path)
+    manifest = {
+        "format_version": 1,
+        "project": {"name": "Unsafe", "description": "", "tags": [], "config": {}},
+        "references": [],
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("../outside.txt", "not allowed")
+
+    with pytest.raises(ValueError, match="unsafe or duplicate path"):
+        service.import_project_bundle(buffer.getvalue())
+
+    assert service.list_projects() == []
+
+
+def test_project_bundle_rejects_changed_reference_bytes(tmp_path):
+    source = ProjectAssetService(tmp_path / "source")
+    project = source.create_project("Integrity test", "", [], {})
+    source.create_reference(project["id"], "ref.png", image_bytes())
+    exported = source.export_project_bundle(project["id"])
+    tampered = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(exported), "r") as original:
+        with zipfile.ZipFile(tampered, "w") as modified:
+            for entry in original.infolist():
+                contents = original.read(entry.filename)
+                if entry.filename.startswith("references/"):
+                    contents = contents[:-1] + bytes([contents[-1] ^ 1])
+                modified.writestr(entry.filename, contents)
+
+    destination = ProjectAssetService(tmp_path / "destination")
+    with pytest.raises(ValueError, match="checksum"):
+        destination.import_project_bundle(tampered.getvalue())
+
+    assert destination.list_projects() == []
+
+
+def test_project_bundle_rolls_back_if_decoded_media_fails_validation(tmp_path):
+    content = b"corrupt image bytes"
+    reference_id = str(uuid4())
+    manifest = {
+        "format_version": 1,
+        "project": {"name": "Invalid media", "description": "", "tags": [], "config": {}},
+        "references": [
+            {
+                "id": reference_id,
+                "original_filename": "corrupt.png",
+                "media_type": "image",
+                "media_format": "png",
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "role": None,
+                "source": None,
+            }
+        ],
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr(f"references/{reference_id}/original.png", content)
+
+    service = ProjectAssetService(tmp_path)
+    with pytest.raises(ValueError, match="invalid or unsupported reference"):
+        service.import_project_bundle(buffer.getvalue())
+
+    assert service.list_projects() == []
+    assert not list((tmp_path / ".trash").iterdir())
+
+
+def test_project_bundle_endpoints_export_and_import(tmp_path, monkeypatch):
+    service = ProjectAssetService(tmp_path)
+    monkeypatch.setattr(project_routes, "project_asset_service", service)
+    project = create_project()
+    data = image_bytes()
+    assert service.create_reference(project["id"], "ref.png", data)["size_bytes"] == len(data)
+
+    exported = client.get(f"/api/projects/{project['id']}/bundle")
+    imported = client.post(
+        "/api/projects/bundle",
+        files={"file": ("project.zip", exported.content, "application/zip")},
+    )
+
+    assert exported.status_code == 200
+    assert exported.headers["content-type"] == "application/zip"
+    assert imported.status_code == 201
+    imported_project = imported.json()
+    assert imported_project["id"] != project["id"]
+    assert len(service.list_references(imported_project["id"])) == 1
+
+    invalid = client.post(
+        "/api/projects/bundle",
+        files={"file": ("invalid.zip", b"not a bundle", "application/zip")},
+    )
+    assert invalid.status_code == 400
+
+
+def test_project_bundle_endpoints_enforce_configured_size_limit(tmp_path, monkeypatch):
+    service = ProjectAssetService(tmp_path, max_bundle_bytes=32)
+    monkeypatch.setattr(project_routes, "project_asset_service", service)
+    project = create_project()
+
+    oversized_export = client.get(f"/api/projects/{project['id']}/bundle")
+    oversized_import = client.post(
+        "/api/projects/bundle",
+        files={"file": ("large.zip", b"x" * 33, "application/zip")},
+    )
+
+    assert oversized_export.status_code == 413
+    assert oversized_import.status_code == 413

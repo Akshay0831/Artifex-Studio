@@ -1,46 +1,64 @@
 # Artifex Studio
 
-Artifex Studio - A unified AI-powered creative studio combining real-time image and audio editing capabilities with direct AI model integration. Built with a React/TypeScript frontend and Python backend featuring FastAPI, PyTorch, and AI/ML libraries for creative workflows.
+Artifex Studio is a local-first creative studio with a React/TypeScript frontend and FastAPI backend. It combines image editing and generation workflows with audio composition tools; provider/model availability depends on the configured backend and is not guaranteed by the UI alone.
 
 ## Key Capabilities
-- **AI Image Generation**: Real-time sprite and art generation with multiple AI models (Stable Diffusion, DALL-E, custom trained models)
-- **Audio Production**: Multi-track audio composition, editing, and sound generation
-- **Direct AI Integration**: Seamless connection to multiple AI generation services and APIs
-- **Real-Time Editing**: Canvas-based manipulation for both visual and audio content
+- **Image Editing**: Canvas editing, generation controls, and post-generation palette/color-limit options
+- **Project References**: Local image/audio reference storage, inline previews, and portable project bundles
+- **Audio Tools**: Multi-track editing foundations; audio generation currently reports unavailable because no production composition backend is configured
+- **Provider Integration**: Optional configured AI providers for supported generation paths
 - **Cross-Platform**: Native support for Windows, macOS, and Linux
-- **Model Management**: Dynamic model loading and scaling with Redis caching
+- **Persistence**: Project metadata and validated reference files stored locally
 - **Web Interface**: Modern React frontend with Tailwind CSS UI
 
 ## Features
 
-- **AI Image Generation**: Real-time sprite and art generation with various AI models
-- **Audio Production**: Multi-track audio composition and editing tools
-- **Direct AI Integration**: Seamless connection to multiple AI generation services and APIs
-- **Real-Time Editing**: Canvas-based manipulation for both visual and audio content
-- **Cross-Platform**: Native support for Windows, macOS, and Linux
+- **Palette constraints**: Fixed palettes, maximum color counts, extracted output palettes, dithering, and alpha preservation
+- **Portable project assets**: Export/import bundles containing project metadata and original reference assets (canvas/Yjs editing state is not included yet)
+- **Local references**: Image/audio references can be uploaded, previewed, and reused from the Art and Audio sidebars
+
+> **Capability status:** Project sharing/authorization, reference-conditioned image generation, audio-reference analysis/MIDI extraction, and training are not implemented. Audio composition currently returns an explicit unavailable error; no placeholder output is reported as generated audio.
 
 ## 📦 Installation
 
 ### Quick Start
-1. **Download the latest release** from [GitHub](https://github.com/Akshay0831/Artifex-Studio)
-2. **Extract to your desired location**
-3. **Run the setup**:
-   - **Windows**: Run `setup-windows.bat` then `start-studio.bat`
-   - **macOS**: Run `setup-macos.sh` then `start-studio.sh`
-   - **Linux**: Run `setup-linux.sh` then `start-studio.sh`
+Each successful push to `main` triggers backend tests, frontend checks, native bundle builds, and packaged-app smoke tests. Passing runs publish numbered `v0.1.0-alpha.N` GitHub prereleases. `dev` runs validation only; manually dispatching this workflow on `dev` creates downloadable workflow artifacts but no release.
+
+1. Download the Windows, Linux, or macOS ZIP from the [GitHub prereleases](https://github.com/Akshay0831/Artifex-Studio/releases) page.
+2. Extract it into a user-writable folder and launch `ArtifexStudio.exe` on Windows or `ArtifexStudio` on macOS/Linux.
+3. Open **http://127.0.0.1:8000** in your browser.
+
+The bundles are unsigned portable application folders, not installers. Python and Node.js are not required to run them. Model weights and provider credentials are not bundled; see [Alpha limitations](#alpha-limitations).
+
+### Build from source
+1. Clone the repository.
+2. Install Python 3.9–3.12 and Node.js/npm.
+3. Run the platform setup script:
+   - **Windows**: `setup-windows.bat`
+   - **macOS**: `bash setup-macos.sh`
+   - **Linux**: `bash setup-linux.sh`
+4. Start the app:
+   - **Windows**: `start-studio.bat`
+   - **macOS/Linux**: `bash start-studio.sh`
+5. Open **http://127.0.0.1:8000**. Do not open the built `index.html` directly.
 
 ### Requirements
-- Python 3.9+ with pip
+- Python 3.9–3.12; Python 3.13 is not supported by the current NumPy constraint
+- Node.js and npm (Node.js 20 is used in CI)
+- Network access on first setup to install dependencies
 
 ## 🎯 Getting Started
 
-1. **Launch the Application**: Run the setup script, then launch with the start script
-2. **Configure AI Models**: Set up your preferred AI generation services through the web interface
-3. **Start Creating**: Use the AI-powered tools for content generation
-4. **Access Applications**: 
-   - **Backend API**: http://localhost:8000
-   - **API Documentation**: http://localhost:8000/docs
-   - **Frontend**: Open `frontend/dist/index.html` in browser
+1. Run setup once, then start the application using the platform launcher.
+2. Open **http://127.0.0.1:8000**; the backend serves the production frontend build.
+3. API documentation is available at **http://127.0.0.1:8000/docs**.
+
+### Alpha limitations
+- Audio composition currently returns an explicit unavailable error; no production music-generation backend is configured.
+- Audio-reference analysis, MIDI transcription, reference-conditioned image/audio generation, multi-user sharing/authorization, and training are not implemented.
+- Image palette limits are applied to generated output; they do not condition the model or derive palettes from stored references.
+- Local project storage is not permission-controlled. Do not expose the server to an untrusted network.
+- Native alpha bundles are unsigned and may trigger operating-system security warnings. Extract them to a user-writable location; project data is stored in the user's application-data directory.
 
 ## Project Structure
 
@@ -48,11 +66,11 @@ Artifex Studio - A unified AI-powered creative studio combining real-time image 
 artifex-studio/
 ├── frontend/         # React/TypeScript frontend
 ├── backend/          # Python backend with AI services
-├── installer/       # Simplified installation scripts
-├── config/          # Configuration files
-├── data/            # Models and output storage
+├── backend/         # FastAPI services and tests
+├── frontend/        # React/TypeScript application
 ├── scripts/         # Deployment and utility scripts
-└── local-tools/     # Validation and testing tools
+├── docs/            # Project documentation
+└── data/            # Runtime project, model, and output data
 ```
 
 ## Development
@@ -62,7 +80,7 @@ The project consists of a React/TypeScript frontend and Python backend.
 ### Frontend Setup
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -73,14 +91,16 @@ pip install -r requirements.txt
 python app.py
 ```
 
-### Running Both
-```bash
-# First setup (one-time)
-python setup.py
+The frontend development server runs on port 3000 and the backend on port 8000. For source installs, run `python setup.py` from the repository root, then use the platform launcher above. Native release bundles are published on the GitHub prereleases page after a successful `main` workflow.
 
-# Then launch both
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000 &
-cd frontend && npm run dev
+### Alpha validation
+```bash
+cd backend
+python -m compileall -q .
+python -m pytest tests
+cd ../frontend
+npm ci
+npm run build
 ```
 
 
@@ -94,5 +114,3 @@ Contributions are welcome.
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
-
-Created by Akshay R

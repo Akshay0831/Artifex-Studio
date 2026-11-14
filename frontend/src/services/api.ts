@@ -147,6 +147,15 @@ export const projectsApi = {
     (await projectsClient.put<StudioProject>(`/api/projects/${projectId}`, data)).data,
   delete: async (projectId: string) =>
     (await projectsClient.delete(`/api/projects/${projectId}`)).data,
+  exportBundle: async (projectId: string) =>
+    (await projectsClient.get<Blob>(`/api/projects/${projectId}/bundle`, {
+      responseType: 'blob',
+    })).data,
+  importBundle: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return (await projectsClient.post<StudioProject>('/api/projects/bundle', form)).data;
+  },
   listReferences: async (projectId: string) =>
     (await projectsClient.get<{ references: ProjectReference[]; total: number }>(
       `/api/projects/${projectId}/references`,

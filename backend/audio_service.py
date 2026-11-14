@@ -8,7 +8,7 @@ from inference_dispatcher import dispatcher
 from utils.telemetry import trace_performance
 from utils.cache import generation_cache
 from utils.encoding import audio_to_base64
-from ai_models.audio_model import get_audio_model
+from ai_models.audio_model import AudioGenerationUnavailableError, get_audio_model
 
 # Audio generation configuration
 class MusicGenerationConfig:
@@ -50,25 +50,10 @@ class AudioService(BaseStudioService):
         seed: int,
         stream_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """Synthesizes audio compositions based on project parameters."""
-        # For now, return a simple mock response that matches AudioResponse schema
-        result = {
-            "composition": {
-                "status": "completed",
-                "seed": seed,
-                "metrics": {"duration": 0.5, "backend": "mock"},
-                "backend": "mock",
-                "output_url": f"/output/audio/composition_seed_{seed:06d}.mid"
-            },
-            "seed": seed,
-            "backend": "mock",
-            "metadata": {"type": "mock_response"}
-        }
-        
-        if stream_callback:
-            await stream_callback({"progress": 100, "status": "completed"})
-            
-        return result
+        """Compose music only when a real generation backend is configured."""
+        raise AudioGenerationUnavailableError(
+            "Audio composition is unavailable: no real composition backend is configured."
+        )
 
     async def pause_stream(self, stream_id: int) -> Dict[str, Any]:
         """Pause an ongoing composition stream."""

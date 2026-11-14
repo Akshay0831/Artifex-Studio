@@ -2,9 +2,9 @@ name: Artifex Studio CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,9 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Compile backend modules
+        run: python -m compileall -q .
+
       - name: Run backend tests
         run: python -m pytest tests -q
 
@@ -61,5 +64,106 @@ jobs:
       - name: Type-check and build frontend
         run: npm run build
 
-# Image publishing and deployment are intentionally not part of this validation
-# workflow until their registry credentials and deployment manifests are verified.
+  build-release:
+    name: Build ${{ matrix.platform }} alpha bundle
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+    needs: [backend-tests, frontend-checks]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux
+          - runner: windows-latest
+            platform: windows
+          - runner: macos-latest
+            platform: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/release_requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend and packaging dependencies
+        run: python -m pip install -r backend/release_requirements.txt pyinstaller==6.15.0
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set alpha version
+        id: version
+        shell: bash
+        run: |
+          version="0.1.0-alpha.${GITHUB_RUN_NUMBER}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build, smoke-test, and archive native bundle
+        run: python packaging/build_release.py --version "${{ steps.version.outputs.version }}" --timeout 180
+
+      - name: Upload alpha bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifex-${{ matrix.platform }}-${{ runner.arch }}
+          path: dist/ArtifexStudio-v*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-alpha:
+    name: Publish main alpha prerelease
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download platform bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifex-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish numbered alpha prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="0.1.0-alpha.${GITHUB_RUN_NUMBER}"
+          notes="$(cat <<'EOF'
+          ## Features
+          - Local projects and reusable image/audio reference management.
+          - Image palette controls and deterministic output limits.
+
+          ## Fixes
+          - Clear errors for unavailable audio generation; no mock results.
+          - Hardened startup, extension loading, and packaged-app smoke checks.
+
+          ## Known limitations
+          - Audio analysis/MIDI, reference-conditioned generation, project sharing, and training are not implemented.
+          - Model weights and provider credentials are not included. Bundles are unsigned alpha builds.
+          EOF
+          )"
+          gh release create "v${version}" release-assets/*.zip \
+            --target "$GITHUB_SHA" \
+            --title "Artifex Studio v${version}" \
+            --notes "$notes" \
+            --prerelease

@@ -32,6 +32,9 @@ import time
 import os
 import asyncio
 import logging
+import sys
+
+APP_VERSION = os.getenv("ARTIFEX_VERSION", "0.1.0-alpha")
 
 # Configure logging
 logging.basicConfig(
@@ -47,7 +50,7 @@ logger = logging.getLogger("studio.backend.app")
 app = FastAPI(
     title="Unified Editing Studio API",
     description="Interactive backend for real-time sprite and music generation",
-    version="1.0.0",
+    version=APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
@@ -112,7 +115,11 @@ app.include_router(templates_router, prefix="/api")
 os.makedirs(settings.OUTPUT_PATH, exist_ok=True)
 app.mount("/output", StaticFiles(directory=settings.OUTPUT_PATH), name="output")
 
-STUDIO_ROOT = Path(__file__).resolve().parent.parent
+STUDIO_ROOT = (
+    Path(getattr(sys, "_MEIPASS"))
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent
+)
 FRONTEND_DIST = STUDIO_ROOT / "frontend" / "dist"
 FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 FRONTEND_ASSETS = FRONTEND_DIST / "assets"
@@ -132,7 +139,7 @@ async def health_check():
         "performance": telemetry.get_summary(),
         "engines": DependencyManager.get_health_report(),
         "uptime_seconds": round(time.time() - start_time, 2),
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "monitoring": health_monitor.get_stats()
     }
 

@@ -17,11 +17,12 @@ class SanitizationResult:
 def sanitize_html(input_str: str, allow_newlines: bool = False) -> str:
     if not input_str:
         return ""
-    
+
+    sanitized = escape(input_str, quote=True)
     if allow_newlines:
-        return escape(input_str, quote=True)
-    
-    return escape(input_str, quote=True, quote=False).replace('\n', '').replace('\r', '')
+        return sanitized
+
+    return sanitized.replace('\n', '').replace('\r', '')
 
 def sanitize_filename(input_str: str, max_length: int = 255) -> str:
     if not input_str:

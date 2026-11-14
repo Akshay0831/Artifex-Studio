@@ -28,6 +28,7 @@ class WebSocketManager:
 
     @trace_performance("ws_handle_message")
     async def handle_message(self, websocket: WebSocket, raw_message: str):
+        message_type = None
         try:
             payload = json.loads(raw_message)
             message_type = payload.get("type")
@@ -40,13 +41,20 @@ class WebSocketManager:
                     payload["worktree"] = target_worktree
                 await handler(websocket, payload)
             else:
-                await websocket.send_json({"type": "error", "message": f"Handler not found: {message_type}"})
+                await websocket.send_json({
+                    "type": "error",
+                    "operation": message_type,
+                    "message": f"Handler not found: {message_type}",
+                })
                 
         except json.JSONDecodeError:
             await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
         except Exception as e:
             logger.error(f"WS Execution error: {e}")
-            await websocket.send_json({"type": "error", "message": str(e)})
+            error_message = {"type": "error", "message": str(e)}
+            if isinstance(message_type, str):
+                error_message["operation"] = message_type
+            await websocket.send_json(error_message)
 
     async def broadcast_json(self, message: Dict[str, Any]):
         """Broadcasts a JSON message to all connected clients efficiently."""
@@ -73,7 +81,7 @@ def load_extensions():
         if filename.endswith("_extension.py"):
             module_name = filename[:-3]
             try:
-                module = importlib.import_module(f"studio.backend.extensions.{module_name}")
+                module = importlib.import_module(f"extensions.{module_name}")
                 if hasattr(module, "register"):
                     module.register(manager)
                     logger.info(f"Extension loaded: {module_name}")

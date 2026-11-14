@@ -8,9 +8,9 @@ load_dotenv()
 
 class Settings(BaseModel):
     # Server
-    SERVER_HOST: str = Field(default=os.getenv("SERVER_HOST", "0.0.0.0"))
+    SERVER_HOST: str = Field(default=os.getenv("SERVER_HOST", "127.0.0.1"))
     SERVER_PORT: int = Field(default=int(os.getenv("SERVER_PORT", "8000")))
-    DEBUG: bool = Field(default=os.getenv("DEBUG", "True").lower() == "true")
+    DEBUG: bool = Field(default=os.getenv("DEBUG", "False").lower() == "true")
     
     # GPU
     GPU_DEVICE: int = Field(default=int(os.getenv("GPU_DEVICE", "0")))
@@ -36,6 +36,10 @@ class Settings(BaseModel):
     )
     REFERENCE_MAX_AUDIO_SECONDS: int = Field(
         default=int(os.getenv("REFERENCE_MAX_AUDIO_SECONDS", "600")),
+        gt=0,
+    )
+    PROJECT_BUNDLE_MAX_BYTES: int = Field(
+        default=int(os.getenv("PROJECT_BUNDLE_MAX_BYTES", str(512 * 1024 * 1024))),
         gt=0,
     )
     

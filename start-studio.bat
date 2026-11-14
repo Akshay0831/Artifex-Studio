@@ -69,8 +69,9 @@ if !VENV_FOUND! equ 1 (
     if exist "frontend\dist\index.html" (
         echo Frontend found: frontend\dist\index.html
     ) else (
-        echo WARNING: Frontend not found at %SCRIPT_DIR%frontend\dist\index.html
-        echo Frontend build might be missing - run npm run build in frontend directory
+        echo ERROR: Frontend build not found at %SCRIPT_DIR%frontend\dist\index.html
+        echo Run setup-windows.bat to build the release UI.
+        set EXIT_CODE=1
     )
 )
 
@@ -105,14 +106,20 @@ if not defined PYTHON_CMD (
     exit /b 1
 )
 
+!PYTHON_CMD! -c "import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] < (3, 13) else 1)" >nul 2>&1
+if !errorlevel! neq 0 (
+    echo ERROR: Artifex Studio alpha requires Python 3.9 through 3.12.
+    set EXIT_CODE=1
+    goto :CheckDependencies
+)
+
 :LaunchApp
 echo.
 echo ========================================
 echo Starting Unified Editing Studio...
 echo ========================================
-echo Backend will be available at: http://localhost:8000
-echo Frontend: Open %SCRIPT_DIR%frontend\dist\index.html
-echo API documentation: http://localhost:8000/docs
+echo Studio will be available at: http://127.0.0.1:8000
+echo API documentation: http://127.0.0.1:8000/docs
 echo.
 echo Press Ctrl+C to stop the server
 echo.

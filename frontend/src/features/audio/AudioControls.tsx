@@ -11,7 +11,7 @@ import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
 
 export const AudioControls: React.FC = () => {
   const { yAudio } = useStudioStore();
-  const { isComposing, compose } = useAudioComposition();
+  const { isComposing, compositionError, compose } = useAudioComposition();
   const { autoSyncAudio, sceneMetadata, updateConfig, analyzeScene } = useProjectConfig();
   const [targetWorktree, setTargetWorktree] = useState<'main' | 'experimental'>('main');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -181,6 +181,11 @@ export const AudioControls: React.FC = () => {
               <Music size={14} className={isComposing ? 'animate-spin' : ''} />
               <span>{isComposing ? 'COMPOSING...' : 'RECOMPOSE ALL'}</span>
             </button>
+            {compositionError && (
+              <p role="alert" className="mt-2 text-xs text-red-400">
+                {compositionError}
+              </p>
+            )}
           </SidebarSection>
         </div>
       </CollapsibleSidebar>

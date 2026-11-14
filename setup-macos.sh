@@ -39,9 +39,9 @@ success_message() {
     echo "========================================"
     echo ""
     echo "Next steps:"
-    echo "1. Run ./start-studio.sh to launch the application"
+    echo "1. Run bash start-studio.sh to launch the application"
     echo "2. Backend will be available at: http://localhost:8000"
-    echo "3. Frontend: Open frontend/dist/index.html"
+    echo "3. Open the studio at: http://127.0.0.1:8000"
     echo "4. API documentation: http://localhost:8000/docs"
     echo ""
 }
@@ -80,13 +80,12 @@ PYTHON_MIN_VERSION="3.9"
 
 # Try different Python executables in order of preference
 python_candidates=(
-    "python3"
-    "python"
-    "python3.13"
     "python3.12"
     "python3.11"
     "python3.10"
     "python3.9"
+    "python3"
+    "python"
     "/usr/bin/python3"
     "/usr/local/bin/python3"
     "/opt/homebrew/bin/python3"
@@ -102,18 +101,14 @@ for candidate in "${python_candidates[@]}"; do
             PYTHON_VERSION=$("$candidate" --version 2>&1 | awk '{print $2}' | sed 's/Python //')
             echo "Found Python: $PYTHON_CMD (version $PYTHON_VERSION)"
             
-            # Check version requirement
-            if ! python3 -c "import sys; exit(0 if tuple(map(int, '$PYTHON_VERSION'.split('.'))) >= tuple(map(int, '$PYTHON_MIN_VERSION'.split('.'))) else 1)" 2>/dev/null; then
-                echo "WARNING: Python version $PYTHON_VERSION found, but $PYTHON_MIN_VERSION+ is recommended"
-            fi
             break
         fi
     fi
 done
 
 if [ -z "$PYTHON_CMD" ]; then
-    error_exit "No Python interpreter found" \
-        "Install Python 3.9+ from https://python.org" \
+    error_exit "No supported Python interpreter found" \
+        "Install Python 3.9 through 3.12 from https://python.org" \
         "Make sure Python is in your PATH environment variable" \
         "On macOS, you can use: brew install python3"
 fi
@@ -148,22 +143,13 @@ echo "Setup log will be shown below:"
 echo ""
 
 # Run setup with error handling
-if ! "$PYTHON_CMD" setup.py; then
-    echo ""
-    error_exit "Setup failed with exit code $?" \
-        "Check the error messages above" \
-        "Make sure you have internet connection for downloading packages" \
-        "Try running: $PYTHON_CMD -m pip install --upgrade pip" \
-        "Try running: $PYTHON_CMD setup.py --help" \
-        "If using a virtual environment, make sure it's properly activated"
-else
+if "$PYTHON_CMD" setup.py; then
     success_message "Setup completed successfully!"
     
-    # Check if application can start
     if [ -f ".venv/bin/activate" ] || [ -f ".venv/Scripts/activate" ]; then
         echo "Virtual environment created successfully."
     else
-        echo "Virtual environment check: Not detected (might be system-wide installation)"
+        echo "WARNING: Virtual environment check: Not detected."
     fi
     
     if [ -f "backend/app.py" ]; then
@@ -174,4 +160,11 @@ else
     
     read -p "Press Enter to continue..."
     exit 0
+else
+    setup_status=$?
+    echo ""
+    error_exit "Setup failed with exit code $setup_status" \
+        "Check the error messages above" \
+        "Make sure you have internet connection for downloading packages" \
+        "Check the error messages above and retry setup after resolving the issue"
 fi

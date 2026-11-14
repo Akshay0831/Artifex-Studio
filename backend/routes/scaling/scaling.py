@@ -80,11 +80,15 @@ class ClusterStatusResponse(BaseModel):
 
 # Initialize scaling components
 scaling_config = ScalingConfig()
+_scaling_components_started = False
 
-@router.on_event("startup")
 @router.on_event("startup")
 async def startup_event():
     """Initialize scaling components on startup"""
+    global _scaling_components_started
+    if _scaling_components_started:
+        return
+
     try:
         # Start the profiler
         profiler.start()
@@ -130,6 +134,7 @@ async def startup_event():
             resource_allocator.add_node(node)
         
         logger.info("All scaling components initialized successfully")
+        _scaling_components_started = True
         
     except Exception as e:
         logger.error(f"Failed to initialize scaling components: {e}")
@@ -138,6 +143,10 @@ async def startup_event():
 @router.on_event("shutdown")
 async def shutdown_event():
     """Clean up scaling components on shutdown"""
+    global _scaling_components_started
+    if not _scaling_components_started:
+        return
+
     try:
         # Stop the profiler
         profiler.stop()
@@ -151,6 +160,7 @@ async def shutdown_event():
         # Stop the resource allocator
         resource_allocator.stop()
         
+        _scaling_components_started = False
         logger.info("All scaling components stopped successfully")
         
     except Exception as e:

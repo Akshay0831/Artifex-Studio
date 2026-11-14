@@ -7,6 +7,7 @@ export const useAudioComposition = () => {
   const [composingLayerIndex, setComposingLayerIndex] = useState<number | null>(null);
   const [compositionProgress, setCompositionProgress] = useState(0);
   const [lastOutputUrl, setLastOutputUrl] = useState<string | null>(null);
+  const [compositionError, setCompositionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!lastMessage) return;
@@ -20,6 +21,7 @@ export const useAudioComposition = () => {
       setIsComposing(false);
       setComposingLayerIndex(null);
       setCompositionProgress(100);
+      setCompositionError(null);
       
       const worktree = lastMessage.worktree || 'main';
       const resultUrl = lastMessage.result?.output_url;
@@ -43,9 +45,14 @@ export const useAudioComposition = () => {
       } else if (resultUrl) {
         setLastOutputUrl(resultUrl);
       }
-    } else if (lastMessage.type === 'error') {
+    } else if (lastMessage.type === 'error' && lastMessage.operation === 'regenerate_audio') {
       setIsComposing(false);
       setComposingLayerIndex(null);
+      setCompositionError(
+        typeof lastMessage.message === 'string'
+          ? lastMessage.message
+          : 'Audio composition failed. Please try again.'
+      );
     }
   }, [lastMessage, yExperimental, yAudio]);
 
@@ -54,6 +61,7 @@ export const useAudioComposition = () => {
     setComposingLayerIndex(layerIndex);
     setCompositionProgress(0);
     setLastOutputUrl(null);
+    setCompositionError(null);
 
     // Extract notes from yAudio
     const notes: Record<string, boolean> = {};
@@ -85,6 +93,7 @@ export const useAudioComposition = () => {
     composingLayerIndex,
     compositionProgress,
     lastOutputUrl,
+    compositionError,
     compose,
     cancel
   };

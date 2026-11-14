@@ -33,11 +33,11 @@ class TrainingMetrics:
     """Training metrics tracking"""
     epoch: int
     train_loss: float
+    learning_rate: float
     val_loss: Optional[float] = None
     train_accuracy: Optional[float] = None
     val_accuracy: Optional[float] = None
-    learning_rate: float
-    timestamp: str = None
+    timestamp: Optional[str] = None
 
 class CustomModelTrainer:
     """
@@ -110,14 +110,13 @@ class CustomModelTrainer:
             # Record metrics
             metrics = TrainingMetrics(
                 epoch=epoch + 1,
-                train_accuracy=train_acc,
-                train_accuracy=train_acc,
+                train_loss=train_loss,
                 learning_rate=current_lr,
+                val_loss=val_loss,
+                train_accuracy=train_acc,
+                val_accuracy=val_acc,
                 timestamp=datetime.utcnow().isoformat()
             )
-            if val_loss is not None:
-                metrics.val_loss = val_loss
-                metrics.val_accuracy = val_acc
             
             self.metrics_history.append(metrics)
             

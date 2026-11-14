@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any
 from fastapi import WebSocket
+from ai_models.audio_model import AudioGenerationUnavailableError
 from audio_service import audio_service
 
 logger = logging.getLogger("studio.backend.extensions.audio")
@@ -20,7 +21,16 @@ async def handle_regenerate_audio(websocket: WebSocket, message_payload: Dict[st
         })
         
     logger.info(f"Audio Extension | Regenerating | Seed: {seed} | Worktree: {target_worktree}")
-    result = await audio_service.compose(audio_config, seed, stream_callback)
+    try:
+        result = await audio_service.compose(audio_config, seed, stream_callback)
+    except AudioGenerationUnavailableError as error:
+        await websocket.send_json({
+            "type": "error",
+            "operation": "regenerate_audio",
+            "code": "AUDIO_GENERATION_UNAVAILABLE",
+            "message": str(error),
+        })
+        return
     await websocket.send_json({
         "type": "composition_complete",
         "worktree": target_worktree,

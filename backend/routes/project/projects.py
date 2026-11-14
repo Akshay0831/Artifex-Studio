@@ -1,10 +1,12 @@
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 from services.project_asset_service import (
     ProjectNotFoundError,
+    ProjectBundleInvalidError,
     ReferenceTooLargeError,
     ReferenceNotFoundError,
     ReferenceProcessingUnavailableError,
@@ -82,6 +84,34 @@ async def list_projects():
     """List all projects"""
     projects = project_asset_service.list_projects()
     return {"projects": projects, "total": len(projects)}
+
+@router.get("/{project_id}/bundle")
+async def export_project_bundle(project_id: str):
+    try:
+        bundle = project_asset_service.export_project_bundle(project_id)
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except ProjectBundleInvalidError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    return Response(
+        content=bundle,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="artifex-project-{project_id}.zip"'},
+    )
+
+
+@router.post("/bundle", status_code=201, response_model=ProjectResponse)
+async def import_project_bundle(file: UploadFile = File(...)):
+    bundle = await file.read(project_asset_service.max_bundle_bytes + 1)
+    if len(bundle) > project_asset_service.max_bundle_bytes:
+        raise HTTPException(status_code=413, detail="Project bundle exceeds the configured size limit")
+    try:
+        project = project_asset_service.import_project_bundle(bundle)
+    except ProjectBundleInvalidError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ReferenceProcessingUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return ProjectResponse(**project)
 
 
 @router.post("/{project_id}/references", status_code=201)

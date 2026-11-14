@@ -6,6 +6,10 @@ import type { ProjectReference, ReferenceRole, StudioProject } from '../../types
 
 const ACTIVE_PROJECT_KEY = 'artifex.activeProjectId';
 
+interface ProjectReferenceLibraryProps {
+  onUseImageReference?: (reference: ProjectReference) => Promise<boolean>;
+}
+
 const getErrorMessage = (error: unknown) => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
@@ -17,7 +21,9 @@ const getErrorMessage = (error: unknown) => {
 const isImageFile = (file: File) =>
   file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name);
 
-export const ProjectReferenceLibrary: React.FC = () => {
+export const ProjectReferenceLibrary: React.FC<ProjectReferenceLibraryProps> = ({
+  onUseImageReference,
+}) => {
   const [projects, setProjects] = useState<StudioProject[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [projectName, setProjectName] = useState('');
@@ -62,6 +68,7 @@ export const ProjectReferenceLibrary: React.FC = () => {
 
     if (!selectedProjectId) {
       setReferences([]);
+      setIsLoadingReferences(false);
       return;
     }
 
@@ -141,6 +148,63 @@ export const ProjectReferenceLibrary: React.FC = () => {
     }
   };
 
+  const exportProject = async () => {
+    if (!selectedProjectId) return;
+    setIsBusy(true);
+    setStatus('');
+    try {
+      const bundle = await projectsApi.exportBundle(selectedProjectId);
+      const url = URL.createObjectURL(bundle);
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `artifex-project-${selectedProjectId}.zip`;
+        document.body.append(link);
+        try {
+          link.click();
+        } finally {
+          link.remove();
+        }
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setStatus('Project bundle exported.');
+    } catch (error) {
+      setStatus(`Could not export project: ${getErrorMessage(error)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const importProject = async (file: File) => {
+    setIsBusy(true);
+    setStatus('');
+    try {
+      const project = await projectsApi.importBundle(file);
+      setProjects(current => [project, ...current]);
+      setSelectedProjectId(project.id);
+      setStatus(`Imported "${project.name}".`);
+    } catch (error) {
+      setStatus(`Could not import project: ${getErrorMessage(error)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleUseImageReference = async (reference: ProjectReference) => {
+    if (!onUseImageReference) return;
+    setIsBusy(true);
+    setStatus('');
+    try {
+      const used = await onUseImageReference(reference);
+      setStatus(used ? `Opened ${reference.original_filename} on the canvas.` : 'Open cancelled.');
+    } catch (error) {
+      setStatus(`Could not open image reference: ${getErrorMessage(error)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const referenceContentUrl = (reference: ProjectReference) =>
     projectsApi.referenceContentUrl(selectedProjectId, reference.id);
 
@@ -150,11 +214,42 @@ export const ProjectReferenceLibrary: React.FC = () => {
         <p className="text-[10px] text-studio-text-dim">Loading projects...</p>
       ) : (
         <>
+          <div className="flex gap-2">
+            <label className="flex flex-1 items-center justify-center gap-1 rounded border border-dashed border-studio-border py-1.5 text-[9px] text-studio-text-dim hover:border-studio-accent hover:text-white cursor-pointer">
+              <Upload size={11} />
+              Import project
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                disabled={isBusy}
+                className="sr-only"
+                onChange={event => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (file) void importProject(file);
+                }}
+              />
+            </label>
+            {selectedProjectId && (
+              <button
+                type="button"
+                onClick={() => void exportProject()}
+                disabled={isBusy}
+                className="flex-1 rounded border border-studio-border py-1.5 text-[9px] text-studio-text-dim hover:text-white disabled:opacity-40"
+              >
+                Export bundle
+              </button>
+            )}
+          </div>
           <label className="flex flex-col gap-1 text-[9px] font-bold uppercase text-studio-text-dim">
             Active local project
             <select
               value={selectedProjectId}
-              onChange={event => setSelectedProjectId(event.target.value)}
+              onChange={event => {
+                setSelectedProjectId(event.target.value);
+                setStatus('');
+              }}
+              disabled={isBusy}
               className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
             >
               <option value="">Select a project</option>
@@ -175,6 +270,7 @@ export const ProjectReferenceLibrary: React.FC = () => {
                 aria-label="New project name"
                 placeholder="New project name"
                 maxLength={200}
+                disabled={isBusy}
                 className="min-w-0 flex-1 bg-black/40 border border-studio-border rounded px-2 py-1 text-xs"
               />
               <button
@@ -198,6 +294,7 @@ export const ProjectReferenceLibrary: React.FC = () => {
             <select
               value={role}
               onChange={event => setRole(event.target.value as ReferenceRole)}
+              disabled={isBusy}
               className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
             >
               <option value="style">Style</option>
@@ -208,11 +305,11 @@ export const ProjectReferenceLibrary: React.FC = () => {
           </label>
           <label className="flex items-center justify-center gap-2 rounded border border-dashed border-studio-border py-2 text-[10px] text-studio-text-dim hover:border-studio-accent hover:text-white cursor-pointer">
             <Upload size={12} />
-            {isBusy ? 'Working...' : 'Add image or audio reference'}
+            {isBusy ? 'Working...' : isLoadingReferences ? 'Loading references...' : 'Add image or audio reference'}
             <input
               type="file"
               accept=".png,.jpg,.jpeg,.webp,.wav,.flac,.ogg,.aiff,.aif"
-              disabled={isBusy}
+              disabled={isBusy || isLoadingReferences}
               className="sr-only"
               onChange={event => {
                 const file = event.currentTarget.files?.[0];
@@ -257,6 +354,16 @@ export const ProjectReferenceLibrary: React.FC = () => {
                         : ''}
                     </p>
                   </div>
+                  {reference.media_type === 'image' && onUseImageReference && (
+                    <button
+                      type="button"
+                      onClick={() => void handleUseImageReference(reference)}
+                      disabled={isBusy}
+                      className="shrink-0 rounded border border-studio-border px-2 py-1 text-[9px] text-studio-text-dim hover:text-white disabled:opacity-40"
+                    >
+                      Use on canvas
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void deleteReference(reference)}
@@ -275,7 +382,7 @@ export const ProjectReferenceLibrary: React.FC = () => {
 
       {status && <p role="status" className="break-words text-[9px] text-studio-text-dim">{status}</p>}
       <p className="text-[9px] leading-relaxed text-studio-text-dim">
-        No user access controls or project sharing are implemented. References are never enrolled for training.
+        Image references can be opened on the canvas; they are not sent to generation automatically. Sharing and training are not enabled.
       </p>
     </div>
   );

@@ -9,8 +9,9 @@ import { useProjectConfig } from '../../core/useProjectConfig';
 import { StudioSelect, StudioToggle, StudioSlider } from '../../features/common/components/Controls';
 import CollapsibleSidebar, { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
 import ArtToolLookup from '../../components/lookup/ArtToolLookup';
-import type { ImagePaletteSettings, PaletteMode } from '../../types/api';
+import type { ImagePaletteSettings, PaletteMode, ProjectReference } from '../../types/api';
 import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
+import { projectsApi } from '../../services/api';
 
 export const ArtControls: React.FC = () => {
   const { yPrompt, yImage, yHistory, yExperimental, lastMessage } = useStudioStore();
@@ -153,6 +154,64 @@ export const ArtControls: React.FC = () => {
     }
   };
 
+  const openImageReference = async (reference: ProjectReference): Promise<boolean> => {
+    if (!yImage) throw new Error('The image canvas is not available.');
+    let hasCanvasObjects = false;
+    const canvasData = yImage.get('canvasData');
+    if (typeof canvasData === 'string') {
+      try {
+        const savedCanvas: { objects?: unknown } = JSON.parse(canvasData);
+        hasCanvasObjects = Array.isArray(savedCanvas.objects) && savedCanvas.objects.length > 0;
+      } catch {
+        hasCanvasObjects = true;
+      }
+    }
+    if (
+      (yImage.get('baseImageData') || hasCanvasObjects) &&
+      !window.confirm('Replace the current canvas base image with this reference?')
+    ) {
+      return false;
+    }
+
+    const imageBlob = await projectsApi.getReferenceContent(
+      reference.project_id,
+      reference.id,
+    );
+    const bitmap = await createImageBitmap(imageBlob);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not create an image canvas.');
+
+      const scale = Math.min(512 / bitmap.width, 512 / bitmap.height);
+      const width = Math.round(bitmap.width * scale);
+      const height = Math.round(bitmap.height * scale);
+      context.drawImage(
+        bitmap,
+        Math.floor((512 - width) / 2),
+        Math.floor((512 - height) / 2),
+        width,
+        height,
+      );
+      const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
+      if (!imageBase64) throw new Error('Could not encode the reference image.');
+      yImage.set('baseImageData', imageBase64);
+      yImage.set('canvasData', JSON.stringify({ version: '5.3.0', objects: [] }));
+      yHistory?.push([{
+        type: 'reference',
+        label: reference.original_filename,
+        preview: `data:image/png;base64,${imageBase64}`,
+        timestamp: Date.now(),
+        project_id: reference.project_id,
+        reference_id: reference.id,
+      }]);
+    } finally {
+      bitmap.close();
+    }
+    return true;
+  };
 
   const models = [
     { id: 'sdxl', name: 'Stable Diffusion XL', description: 'Fast, high quality' },
@@ -181,7 +240,7 @@ export const ArtControls: React.FC = () => {
           </SidebarSection>
 
           <SidebarSection title="Project References" icon={FolderOpen}>
-            <ProjectReferenceLibrary />
+            <ProjectReferenceLibrary onUseImageReference={openImageReference} />
           </SidebarSection>
 
           {/* Model Selection Section */}

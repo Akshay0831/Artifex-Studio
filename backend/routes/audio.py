@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from models.request_schemas import ComposeAudioRequest
 from models.response_schemas import AudioResponse
+from ai_models.audio_model import AudioGenerationUnavailableError
 from audio_service import audio_service
 
 router = APIRouter(prefix="/audio", tags=["audio"])
@@ -13,6 +14,8 @@ async def compose_audio(request: ComposeAudioRequest):
             seed=request.seed
         )
         return result
+    except AudioGenerationUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
