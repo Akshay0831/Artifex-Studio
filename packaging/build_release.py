@@ -15,6 +15,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP_DIR = DIST / "ArtifexStudio"
+GITHUB_RELEASE_ASSET_LIMIT_BYTES = 2 * 1024**3
+
+
+def _validate_release_asset_size(size_bytes: int) -> None:
+    if size_bytes >= GITHUB_RELEASE_ASSET_LIMIT_BYTES:
+        raise ValueError(
+            f"Release asset is {size_bytes} bytes; GitHub requires each asset "
+            f"to be smaller than {GITHUB_RELEASE_ASSET_LIMIT_BYTES} bytes (2 GiB)."
+        )
 
 
 def _platform_slug() -> str:
@@ -164,6 +173,7 @@ def build_release(version: str, timeout: int) -> Path:
         for path in APP_DIR.rglob("*"):
             if path.is_file():
                 output.write(path, Path(APP_DIR.name) / path.relative_to(APP_DIR))
+    _validate_release_asset_size(archive.stat().st_size)
     print(f"Created {archive}")
     return archive
 

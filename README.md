@@ -29,6 +29,7 @@ Each successful push to `main` triggers backend tests, frontend checks, native b
 3. Open **http://127.0.0.1:8000** in your browser.
 
 The bundles are unsigned portable application folders, not installers. Python and Node.js are not required to run them. Model weights and provider credentials are not bundled; see [Alpha limitations](#alpha-limitations).
+The Linux alpha bundle uses CPU-only PyTorch to stay below GitHub's per-file release limit; CUDA acceleration is not included in that bundle.
 
 ### Build from source
 1. Clone the repository.

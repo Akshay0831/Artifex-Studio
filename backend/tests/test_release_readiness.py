@@ -1,4 +1,8 @@
+import runpy
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from ai_models.model_training import TrainingMetrics
 from app import app
@@ -7,6 +11,10 @@ from routes.scaling import scaling
 from routes.scaling.scaling import startup_event as scaling_startup_event
 from utils.sanitization import sanitize_html
 from websocket_handler import manager
+
+RELEASE_BUILD = runpy.run_path(
+    str(Path(__file__).resolve().parents[2] / "packaging" / "build_release.py")
+)
 
 
 def test_training_metrics_can_be_constructed_with_required_fields():
@@ -87,3 +95,12 @@ def test_health_reports_the_application_version():
 
     assert response.status_code == 200
     assert response.json()["version"] == app.version
+
+
+def test_release_asset_size_must_be_below_github_limit():
+    limit = RELEASE_BUILD["GITHUB_RELEASE_ASSET_LIMIT_BYTES"]
+    validate_size = RELEASE_BUILD["_validate_release_asset_size"]
+
+    validate_size(limit - 1)
+    with pytest.raises(ValueError, match="smaller than"):
+        validate_size(limit)
