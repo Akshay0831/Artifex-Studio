@@ -1,8 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 // Theme configuration types
-interface MaterialTheme {
-  mode: 'light' | 'dark' | 'auto'
+export interface MaterialTheme {
   density: 'compact' | 'normal' | 'comfortable'
   spacing: 'tight' | 'normal' | 'comfortable' | 'spacious' | 'extra-spacious'
   accentColor: 'primary' | 'secondary' | 'accent' | 'success' | 'error' | 'warning'
@@ -26,7 +25,6 @@ interface ThemeConfigContextType {
 
 // Default theme configuration
 const DEFAULT_THEME: MaterialTheme = {
-  mode: 'dark',
   density: 'normal',
   spacing: 'normal',
   accentColor: 'primary',
@@ -34,7 +32,40 @@ const DEFAULT_THEME: MaterialTheme = {
   animations: 'standard'
 }
 
+export const SPACING_MULTIPLIERS: Record<MaterialTheme['spacing'], number> = {
+  tight: 0.875,
+  normal: 1,
+  comfortable: 1.125,
+  spacious: 1.25,
+  'extra-spacious': 1.375,
+}
+
 const ThemeConfigContext = createContext<ThemeConfigContextType | undefined>(undefined)
+
+function isOption<T extends string>(value: unknown, options: readonly T[]): value is T {
+  return typeof value === 'string' && options.some(option => option === value)
+}
+
+function pickOption<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+  return isOption(value, options) ? value : fallback
+}
+
+function loadSavedTheme(): MaterialTheme {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem('material-theme') || 'null')
+    if (typeof saved !== 'object' || saved === null) return DEFAULT_THEME
+    const values = saved as Record<string, unknown>
+    return {
+      density: pickOption(values.density, ['compact', 'normal', 'comfortable'], DEFAULT_THEME.density),
+      spacing: pickOption(values.spacing, ['tight', 'normal', 'comfortable', 'spacious', 'extra-spacious'], DEFAULT_THEME.spacing),
+      accentColor: pickOption(values.accentColor, ['primary', 'secondary', 'accent', 'success', 'error', 'warning'], DEFAULT_THEME.accentColor),
+      borderRadius: pickOption(values.borderRadius, ['minimal', 'normal', 'rounded', 'extra-rounded'], DEFAULT_THEME.borderRadius),
+      animations: pickOption(values.animations, ['none', 'minimal', 'standard', 'enhanced'], DEFAULT_THEME.animations),
+    }
+  } catch {
+    return DEFAULT_THEME
+  }
+}
 
 // Material Design spacing scales based on user preference
 const SPACING_SCALES = {
@@ -92,80 +123,81 @@ const BORDER_RADIUS = {
     sm: '4px',
     md: '4px',
     lg: '4px',
-    xl: '6px'
+    xl: '6px',
+    '2xl': '8px',
+    '3xl': '10px',
   },
   normal: {
     xs: '4px',
     sm: '6px',
     md: '8px',
     lg: '12px',
-    xl: '16px'
+    xl: '16px',
+    '2xl': '20px',
+    '3xl': '24px',
   },
   rounded: {
     xs: '6px',
     sm: '8px',
     md: '12px',
     lg: '16px',
-    xl: '20px'
+    xl: '20px',
+    '2xl': '24px',
+    '3xl': '28px',
   },
   'extra-rounded': {
     xs: '8px',
     sm: '12px',
     md: '16px',
     lg: '20px',
-    xl: '24px'
+    xl: '24px',
+    '2xl': '28px',
+    '3xl': '32px',
   }
 }
 
-export function ThemeConfigProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<MaterialTheme>(() => {
-    // Load saved theme from localStorage
-    const saved = localStorage.getItem('material-theme')
-    return saved ? { ...DEFAULT_THEME, ...JSON.parse(saved) } : DEFAULT_THEME
-  })
+const ACCENT_VARIABLES: Record<MaterialTheme['accentColor'], string> = {
+  primary: '--studio-primary',
+  secondary: '--studio-secondary',
+  accent: '--studio-accent-default',
+  success: '--studio-success',
+  error: '--studio-error',
+  warning: '--studio-warning',
+}
 
-  const [globalSpacingScale] = useState(SPACING_SCALES[theme.spacing])
+export function ThemeConfigProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<MaterialTheme>(loadSavedTheme)
+
+  const globalSpacingScale = useMemo(() => SPACING_SCALES[theme.spacing], [theme.spacing])
 
   useEffect(() => {
-    // Save theme to localStorage
-    localStorage.setItem('material-theme', JSON.stringify(theme))
-    
-    // Apply CSS custom properties
-    applyThemeToDOM()
-  }, [theme])
-
-  const applyThemeToDOM = () => {
     const root = document.documentElement
-    
-    // Apply spacing scale
     Object.entries(SPACING_SCALES[theme.spacing]).forEach(([key, value]) => {
       root.style.setProperty(`--spacing-${key}`, value)
     })
-    
-    // Apply border radius
     Object.entries(BORDER_RADIUS[theme.borderRadius]).forEach(([key, value]) => {
       root.style.setProperty(`--radius-${key}`, value)
     })
-    
-    // Apply theme mode
-    const resolvedMode = theme.mode === 'auto' 
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : theme.mode
-    
-    root.classList.remove('light', 'dark')
-    root.classList.add(resolvedMode)
-    
-    // Apply accent color
-    root.style.setProperty('--accent-color', `var(--studio-${theme.accentColor})`)
-    
-    // Apply density
+
+    root.style.setProperty('--studio-spacing-scale', String(SPACING_MULTIPLIERS[theme.spacing]))
+    root.style.setProperty('--studio-accent', `var(${ACCENT_VARIABLES[theme.accentColor]})`)
+    root.dataset.spacing = theme.spacing
+    root.dataset.borderRadius = theme.borderRadius
+    root.dataset.animations = theme.animations
+
     const densityScale = {
       compact: 0.8,
       normal: 1,
       comfortable: 1.2
     }
     root.style.setProperty('--density-scale', densityScale[theme.density].toString())
-  }
+
+    try {
+      localStorage.setItem('material-theme', JSON.stringify(theme))
+    } catch {
+      // Appearance changes still apply for this session when storage is unavailable.
+    }
+  }, [theme])
 
   const setThemeProperty = (updates: Partial<MaterialTheme>) => {
     setTheme(prev => ({ ...prev, ...updates }))

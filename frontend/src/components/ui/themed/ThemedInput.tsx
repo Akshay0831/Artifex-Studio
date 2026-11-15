@@ -1,8 +1,10 @@
 import React, { forwardRef } from 'react';
 import { cn } from '../../../lib/utils';
-import { useTheme } from '../../../core/ThemeContext';
 
-export interface ThemedInputProps {
+export interface ThemedInputProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'size' | 'value' | 'onChange'
+> {
   variant?: 'default' | 'filled' | 'outlined';
   size?: 'sm' | 'md' | 'lg';
   error?: boolean;
@@ -44,8 +46,6 @@ export const ThemedInput = forwardRef<HTMLInputElement, ThemedInputProps>(({
   label,
   ...props
 }, ref) => {
-  const { isDark } = useTheme();
-  
   const input = (
     <input
       ref={ref}

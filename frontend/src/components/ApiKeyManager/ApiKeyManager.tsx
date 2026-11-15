@@ -9,6 +9,7 @@ import { Plus, Settings, Key, Trash2, Edit, Copy, CheckCircle, AlertCircle } fro
 import { ApiProfileEditor } from './ApiProfileEditor'
 import { ApiKeySelector } from './ApiKeySelector'
 import { ApiProfile } from '../../types/api'
+import { TruncatedText } from '../common/TruncatedText'
 
 export const ApiKeyManager: React.FC = () => {
   const { state, addProfile, updateProfile, deleteProfile, refreshProfiles } = useApiKey()
@@ -42,9 +43,9 @@ export const ApiKeyManager: React.FC = () => {
         </CardHeader>
         <CardContent>
           {state.isLoading && (
-            <div className="flex items-center gap-2 p-4 bg-blue-50 rounded-lg mb-4">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-              <span className="text-sm text-blue-700">Loading API profiles...</span>
+            <div className="flex items-center gap-2 p-4 bg-studio-panel-hover text-studio-text rounded-lg mb-4">
+              <div className="animate-spin h-4 w-4 border-2 border-studio-accent border-t-transparent rounded-full"></div>
+              <span className="text-sm">Loading API profiles...</span>
             </div>
           )}
           
@@ -65,7 +66,7 @@ export const ApiKeyManager: React.FC = () => {
             </Alert>
           )}
 
-          <Tabs value="selector" className="w-full">
+          <Tabs defaultValue="selector" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="selector">API Selector</TabsTrigger>
               <TabsTrigger value="profiles">Profile Management</TabsTrigger>
@@ -116,9 +117,9 @@ export const ApiKeyManager: React.FC = () => {
                   >
                     <CardContent className="pt-4">
                       <div className="flex items-center justify-between">
-                        <div className="flex-1">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-semibold">{profile.name}</h4>
+                            <TruncatedText text={profile.name} className="font-semibold" />
                             <Badge variant={profile.is_active ? "default" : "secondary"}>
                               {profile.api_type.toUpperCase()}
                             </Badge>
@@ -189,7 +190,7 @@ export const ApiKeyManager: React.FC = () => {
                               }
                             }}
                             disabled={profile.is_active}
-                            className="text-red-600 hover:text-red-700"
+                            className="text-studio-error hover:text-studio-error/80"
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>

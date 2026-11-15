@@ -5,20 +5,81 @@ import { useStudioStore } from '../../core/useStudioStore';
 import { useArtGeneration } from '../../hooks/useArtGeneration';
 import { useWorktree } from '../../core/useWorktree';
 import { useProjectConfig } from '../../core/useProjectConfig';
+import { useApiKey } from '../../components/ApiKeyManager/ApiKeyContext';
+import { textGenerationApi } from '../../services/api';
+import { useActiveImageTool } from '../../hooks/useImageEditor';
+import { useToolShortcuts } from '../../hooks/useToolShortcuts';
+import { ApiErrorHandler } from '../../utils/apiErrorHandler';
 
 import { StudioSelect, StudioToggle, StudioSlider } from '../../features/common/components/Controls';
-import CollapsibleSidebar, { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
+import { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
+import { DockSectionStack } from '../../components/layout/DockSectionStack';
 import ArtToolLookup from '../../components/lookup/ArtToolLookup';
-import type { ImagePaletteSettings, PaletteMode, ProjectReference } from '../../types/api';
+import type {
+  ImagePaletteSettings,
+  ImagePaletteSourceReference,
+  PaletteMode,
+  ProjectReference,
+} from '../../types/api';
 import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
-import { projectsApi } from '../../services/api';
+import { projectsApi, artApi } from '../../services/api';
+
+const ART_TOOL_SHORTCUTS = {
+  select: 'v',
+  selection: 'm',
+  brush: 'b',
+  eraser: 'e',
+  shape: 'u',
+  text: 't',
+  crop: 'c',
+};
+
+const isImagePaletteSourceReference = (
+  value: unknown,
+): value is ImagePaletteSourceReference => {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    'project_id' in value &&
+    typeof value.project_id === 'string' &&
+    'reference_id' in value &&
+    typeof value.reference_id === 'string' &&
+    'sha256' in value &&
+    typeof value.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/i.test(value.sha256) &&
+    'original_filename' in value &&
+    typeof value.original_filename === 'string'
+  );
+};
 
 export const ArtControls: React.FC = () => {
-  const { yPrompt, yImage, yHistory, yExperimental, lastMessage } = useStudioStore();
+  const {
+    yPrompt,
+    yImage,
+    yHistory,
+    yExperimental,
+    lastMessage,
+    activateProject,
+    flushPersistence,
+  } = useStudioStore();
+  const { activeTool, setActiveTool } = useActiveImageTool(yImage);
+  const { shortcuts: toolShortcuts, updateShortcut } = useToolShortcuts(
+    'studio-art-tool-shortcuts:v1',
+    ART_TOOL_SHORTCUTS,
+    setActiveTool,
+  );
   const { startReview } = useWorktree();
   const { stylePreset, updateConfig, refinePrompt } = useProjectConfig();
+  const { state: apiKeyState } = useApiKey();
+  const selectedProfile = apiKeyState.currentProfile
+    ? apiKeyState.profiles[apiKeyState.currentProfile]
+    : undefined;
+  const localTextProfile = selectedProfile &&
+    (selectedProfile.api_type === 'ollama' || selectedProfile.api_type === 'lm_studio')
+    ? selectedProfile
+    : undefined;
   const { 
     isGenerating, 
+    generationError,
     variations, 
     variationSettings,
     generate, 
@@ -33,16 +94,30 @@ export const ArtControls: React.FC = () => {
   const [paletteMode, setPaletteMode] = useState<PaletteMode>('off');
   const [maxColors, setMaxColors] = useState(16);
   const [paletteColors, setPaletteColors] = useState(['#1B1B1B', '#F4F4F4']);
+  const [paletteSourceReference, setPaletteSourceReference] =
+    useState<ImagePaletteSourceReference | null>(null);
   const [paletteDither, setPaletteDither] = useState(false);
   const [preserveAlpha, setPreserveAlpha] = useState(true);
   const [targetWorktree, setTargetWorktree] = useState<'main' | 'experimental'>('main');
-  const [isRefining, setIsRefining] = useState(false);  const [selectedTool, setSelectedTool] = useState('brush');
+  const [isRefining, setIsRefining] = useState(false);
+  const [isInpainting, setIsInpainting] = useState(false);
+  const handleShortcutChange = (toolId: string, value: string) => {
+    const error = updateShortcut(toolId, value);
+    if (error) toast.error(error);
+  };
   useEffect(() => {
     if (lastMessage?.type === 'prompt_refined') {
       setPrompt(lastMessage.refined);
       yPrompt?.set('currentPrompt', lastMessage.refined);
       setIsRefining(false);
       toast.success('Prompt expanded!');
+    } else if (lastMessage?.type === 'error' && lastMessage.operation === 'refine_prompt') {
+      setIsRefining(false);
+      toast.error(
+        typeof lastMessage.message === 'string'
+          ? lastMessage.message
+          : 'Prompt enhancement failed.',
+      );
     }
   }, [lastMessage, yPrompt]);
 
@@ -50,9 +125,11 @@ export const ArtControls: React.FC = () => {
     if (!yPrompt) return;
     const update = () => {
       const p = yPrompt.get('currentPrompt');
-      if (typeof p === 'string' && p !== prompt) setPrompt(p);
+      const currentPrompt = typeof p === 'string' ? p : '';
+      if (currentPrompt !== prompt) setPrompt(currentPrompt);
       const s = yPrompt.get('currentSeed');
-      if (typeof s === 'number' && s !== seed) setSeed(s);
+      const currentSeed = typeof s === 'number' ? s : 0;
+      if (currentSeed !== seed) setSeed(currentSeed);
     };
     yPrompt.observe(update);
     update();
@@ -63,13 +140,11 @@ export const ArtControls: React.FC = () => {
     if (!yPrompt) return;
     const update = () => {
       const mode = yPrompt.get('paletteMode');
-      if (mode === 'off' || mode === 'extract' || mode === 'fixed' || mode === 'maximum') {
-        setPaletteMode(mode);
-      }
+      setPaletteMode(
+        mode === 'extract' || mode === 'fixed' || mode === 'maximum' ? mode : 'off',
+      );
       const count = yPrompt.get('paletteMaxColors');
-      if (typeof count === 'number' && count >= 1 && count <= 256) {
-        setMaxColors(count);
-      }
+      setMaxColors(typeof count === 'number' && count >= 1 && count <= 256 ? count : 16);
       const colors = yPrompt.get('paletteColors');
       if (
         Array.isArray(colors) &&
@@ -78,9 +153,15 @@ export const ArtControls: React.FC = () => {
         colors.every(color => typeof color === 'string')
       ) {
         setPaletteColors(colors);
+      } else {
+        setPaletteColors(['#1B1B1B', '#F4F4F4']);
       }
       setPaletteDither(yPrompt.get('paletteDither') === true);
       setPreserveAlpha(yPrompt.get('palettePreserveAlpha') !== false);
+      const sourceReference = yPrompt.get('paletteSourceReference');
+      setPaletteSourceReference(
+        isImagePaletteSourceReference(sourceReference) ? sourceReference : null,
+      );
     };
     yPrompt.observe(update);
     update();
@@ -89,7 +170,51 @@ export const ArtControls: React.FC = () => {
 
   const handleRefine = () => {
     setIsRefining(true);
-    refinePrompt(prompt);
+    if (localTextProfile) {
+      const model = localTextProfile.default_model || localTextProfile.models[0];
+      if (!model) {
+        setIsRefining(false);
+        toast.error('The selected local profile has no model. Discover and select a model first.');
+        return;
+      }
+
+      void textGenerationApi.generate({
+        prompt,
+        system_prompt: [
+          'Rewrite the following as a clear, detailed image-generation prompt.',
+          'Preserve the subject and intent. Return only the rewritten prompt.',
+          `Style preset: ${stylePreset || 'none'}`,
+        ].join('\n'),
+        model,
+        api_profile_id: localTextProfile.id,
+        generation_type: 'text',
+        temperature: localTextProfile.temperature ?? 0.3,
+      }).then(response => {
+        const refined = response.result?.trim();
+        if (!refined) throw new Error('The local model returned no text.')
+        setPrompt(refined);
+        yPrompt?.set('currentPrompt', refined);
+        toast.success(`Prompt refined with ${model}.`);
+      }).catch(error => {
+        const response = typeof error === 'object' && error !== null && 'response' in error
+          ? (error as { response?: { data?: { detail?: unknown } } }).response
+          : undefined;
+        const detail = response?.data?.detail;
+        toast.error(
+          typeof detail === 'string'
+            ? detail
+            : ApiErrorHandler.handleError(error),
+        );
+      }).finally(() => setIsRefining(false));
+      return;
+    }
+
+    try {
+      refinePrompt(prompt);
+    } catch (error) {
+      setIsRefining(false);
+      toast.error(error instanceof Error ? error.message : 'Could not enhance the prompt.');
+    }
   };
 
   const paletteSettings = (): ImagePaletteSettings => ({
@@ -98,11 +223,26 @@ export const ArtControls: React.FC = () => {
     max_colors: paletteMode === 'maximum' || paletteMode === 'extract' ? maxColors : null,
     dither: paletteDither,
     preserve_alpha: preserveAlpha,
+    source_reference: paletteMode === 'fixed' ? paletteSourceReference : null,
   });
 
   const updatePaletteColors = (colors: string[]) => {
     setPaletteColors(colors);
     yPrompt?.set('paletteColors', colors);
+  };
+
+  const extractImagePalette = async (reference: ProjectReference): Promise<number> => {
+    const extracted = await projectsApi.extractReferencePalette(
+      reference.project_id,
+      reference.id,
+      maxColors,
+    );
+    setPaletteMode('fixed');
+    yPrompt?.set('paletteMode', 'fixed');
+    updatePaletteColors(extracted.colors);
+    setPaletteSourceReference(extracted.source_reference);
+    yPrompt?.set('paletteSourceReference', extracted.source_reference);
+    return extracted.colors.length;
   };
 
   const promote = (data: string, settings: ImagePaletteSettings) => {
@@ -136,6 +276,33 @@ export const ArtControls: React.FC = () => {
         timestamp: Date.now(),
         generation_settings: { palette: settings },
       }]);
+    }
+  };
+
+  const handleInpaint = async () => {
+    if (!yImage) return;
+    const baseImage = yImage.get('baseImageData');
+    if (!baseImage) {
+      toast.error('Place or generate a base image on canvas before inpainting.');
+      return;
+    }
+    const maskImage = yImage.get('maskLayerData') || baseImage;
+    setIsInpainting(true);
+    try {
+      const res = await artApi.inpaintImage({
+        base_image: baseImage,
+        mask_image: maskImage,
+        prompt: prompt || 'high quality detail',
+        seed: seed || 42,
+      });
+      if (res && res.image_base64) {
+        promote(res.image_base64, paletteSettings());
+        toast.success('Inpainting completed successfully!');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || err?.message || 'Inpainting failed');
+    } finally {
+      setIsInpainting(false);
     }
   };
 
@@ -219,28 +386,25 @@ export const ArtControls: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-studio-panel overflow-hidden">
-      {/* Main Collapsible Sidebar */}
-      <CollapsibleSidebar
-        title="Art Studio"
-        icon={Wand2}
-        defaultCollapsed={false}
-        minWidth={180}
-        maxWidth={280}
-        className="flex-shrink-0"
-      >
-        <div className="p-3 space-y-4">
+    <div className="h-full min-h-0 overflow-y-auto custom-scrollbar bg-studio-panel">
+      <DockSectionStack storageKey="studio-art-sections:v1" className="space-y-2">
           {/* Tool Selection Section */}
           <SidebarSection title="Tools" icon={Wand2}>
             <ArtToolLookup
-              activeTool={selectedTool}
-              onToolSelect={setSelectedTool}
-              showCompact={false}
+              activeTool={activeTool}
+              onToolSelect={setActiveTool}
+              toolShortcuts={toolShortcuts}
+              onShortcutChange={handleShortcutChange}
             />
           </SidebarSection>
 
           <SidebarSection title="Project References" icon={FolderOpen}>
-            <ProjectReferenceLibrary onUseImageReference={openImageReference} />
+            <ProjectReferenceLibrary
+              onProjectChange={activateProject}
+              onBeforeExport={flushPersistence}
+              onUseImageReference={openImageReference}
+              onExtractImagePalette={extractImagePalette}
+            />
           </SidebarSection>
 
           {/* Model Selection Section */}
@@ -285,10 +449,12 @@ export const ArtControls: React.FC = () => {
                     onClick={handleRefine}
                     disabled={!prompt.trim() || isRefining}
                     className={`flex items-center gap-1.5 px-2 py-1 rounded text-[9px] font-bold transition-all ${isRefining ? 'bg-studio-accent/20 text-studio-accent animate-pulse' : 'bg-studio-accent/10 text-studio-accent hover:bg-studio-accent hover:text-white'}`}
-                    title="Enhance prompt details"
+                    title={localTextProfile
+                      ? `Refine with ${localTextProfile.name}`
+                      : 'Expand using built-in preset terms; no AI model is called'}
                   >
                     {isRefining ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
-                    <span>ENHANCE</span>
+                    <span>{localTextProfile ? 'AI ENHANCE' : 'EXPAND'}</span>
                   </button>
                 </div>
                 <textarea 
@@ -339,32 +505,42 @@ export const ArtControls: React.FC = () => {
                         const mode = event.target.value as PaletteMode;
                         setPaletteMode(mode);
                         yPrompt?.set('paletteMode', mode);
+                        if (mode !== 'fixed') {
+                          setPaletteSourceReference(null);
+                          yPrompt?.delete('paletteSourceReference');
+                        }
                       }}
                       className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs normal-case"
                     >
                       <option value="off">Unrestricted</option>
                       <option value="maximum">Maximum colors</option>
-                      <option value="extract">Extract from generated image</option>
+                      <option value="extract">Extract a palette from the generated image</option>
                       <option value="fixed">Fixed palette</option>
                     </select>
                   </label>
 
-                  {(paletteMode === 'maximum' || paletteMode === 'extract') && (
-                    <label className="flex flex-col gap-1 text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
-                      Maximum colors (1-256)
-                      <input
-                        type="number"
-                        min={1}
-                        max={256}
-                        value={maxColors}
-                        onChange={(event) => {
-                          const count = Math.min(256, Math.max(1, Number(event.target.value) || 1));
-                          setMaxColors(count);
-                          yPrompt?.set('paletteMaxColors', count);
-                        }}
-                        className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs"
-                      />
-                    </label>
+                  <label className="flex flex-col gap-1 text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
+                    {paletteMode === 'maximum' || paletteMode === 'extract'
+                      ? 'Maximum colors (1-256)'
+                      : 'Colors to extract from reference (1-256)'}
+                    <input
+                      type="number"
+                      min={1}
+                      max={256}
+                      value={maxColors}
+                      onChange={(event) => {
+                        const count = Math.min(256, Math.max(1, Number(event.target.value) || 1));
+                        setMaxColors(count);
+                        yPrompt?.set('paletteMaxColors', count);
+                      }}
+                      className="bg-black/40 border border-studio-border rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+
+                  {paletteSourceReference && paletteMode === 'fixed' && (
+                    <p className="text-[9px] leading-relaxed text-studio-text-dim">
+                      Extracted from {paletteSourceReference.original_filename}; applied as fixed output colors. The reference image is not sent to generation.
+                    </p>
                   )}
 
                   {paletteMode === 'fixed' && (
@@ -436,12 +612,12 @@ export const ArtControls: React.FC = () => {
                     </>
                   )}
                   <p className="text-[9px] leading-relaxed text-studio-text-dim">
-                    Limits are enforced on the exported image after generation.
+                    Image references are only sampled when you choose “Use palette” in the reference library. Output color constraints are applied after generation.
                   </p>
                 </div>
               </SidebarSection>
 
-              {/* Generate Button */}
+              {/* Generate & Inpaint Buttons */}
               <button 
                 onClick={handleGenerate}
                 disabled={!prompt.trim() && !isGenerating}
@@ -449,6 +625,24 @@ export const ArtControls: React.FC = () => {
               >
                 {isGenerating ? 'STOP' : 'GENERATE'}
               </button>
+              <button 
+                type="button"
+                onClick={handleInpaint}
+                disabled={isInpainting || isGenerating}
+                className={`w-full py-2 rounded font-bold text-xs transition-all border ${
+                  isInpainting 
+                    ? 'bg-amber-900/50 text-amber-200 border-amber-800' 
+                    : 'bg-black/40 border-studio-border text-studio-text hover:bg-studio-hover hover:border-studio-accent'
+                }`}
+                title="Inpaint using canvas mask and prompt"
+              >
+                {isInpainting ? 'INPAINTING...' : 'INPAINT MASK AREA'}
+              </button>
+              {generationError && (
+                <p role="alert" className="text-xs text-red-400">
+                  {generationError}
+                </p>
+              )}
               <label className="flex items-center justify-between text-[9px] font-bold uppercase text-studio-text-dim">
                 Output target
                 <select
@@ -490,8 +684,7 @@ export const ArtControls: React.FC = () => {
               </div>
             </div>
           </SidebarSection>
-        </div>
-      </CollapsibleSidebar>
+      </DockSectionStack>
     </div>
   );
 };

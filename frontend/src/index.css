@@ -3,19 +3,100 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  --studio-bg: 248 250 252;
+  --studio-bg-hover: 226 232 240;
+  --studio-background: 241 245 249;
+  --studio-panel: 255 255 255;
+  --studio-panel-bg: 255 255 255;
+  --studio-panel-darker: 226 232 240;
+  --studio-panel-d: 203 213 225;
+  --studio-panel-border: 203 213 225;
+  --studio-panel-hover: 241 245 249;
+  --studio-panel-selected: 219 234 254;
+  --studio-header: 248 250 252;
+  --studio-card: 255 255 255;
+  --studio-card-hover: 241 245 249;
+  --studio-border: 203 213 225;
+  --studio-border-bright: 148 163 184;
+  --studio-accent-default: 37 99 235;
+  --studio-accent: 79 70 229;
+  --studio-accent-hover: 29 78 216;
+  --studio-accent-orange: 234 88 12;
+  --studio-primary: 79 70 229;
+  --studio-secondary: 124 58 237;
+  --studio-text: 15 23 42;
+  --studio-text-dim: 71 85 105;
+  --studio-text-secondary: 71 85 105;
+  --studio-hover: 226 232 240;
+  --studio-muted: 100 116 139;
+  --studio-light: 248 250 252;
+  --studio-dark: 15 23 42;
+  --studio-pro: 124 58 237;
+  --studio-language: 37 99 235;
+  --studio-shadow: 15 23 42;
+  --studio-error: 220 38 38;
+  --studio-success: 5 150 105;
+  --studio-warning: 217 119 6;
+  --studio-info: 37 99 235;
+  --studio-input-bg: 255 255 255;
+  --studio-input-border: 148 163 184;
+  --studio-sidebar-bg: 241 245 249;
+  --studio-spacing-scale: 1;
+  --density-scale: 1;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  color: rgb(var(--studio-text));
+}
+
+html.dark {
+  --studio-accent: 99 102 241;
 }
 
 body {
   margin: 0;
   padding: 0;
+  color: rgb(var(--studio-text));
+  background-color: rgb(var(--studio-bg));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  font-size: calc(16px * var(--density-scale, 1));
 }
 
 #root {
   height: 100vh;
   width: 100vw;
+}
+
+.dock-panel-tab {
+  min-width: 40px;
+}
+
+.adaptive-label-host {
+  container-type: inline-size;
+}
+
+.adaptive-label-text {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.dock-panel-header-collapsed .dock-panel-label {
+  display: none;
+}
+
+@container (max-width: 112px) {
+  .adaptive-label-text {
+    display: none;
+  }
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -33,6 +114,30 @@ body {
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #444;
+}
+
+html[data-animations='none'] *,
+html[data-animations='none'] *::before,
+html[data-animations='none'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-animations='minimal'] *,
+html[data-animations='minimal'] *::before,
+html[data-animations='minimal'] *::after {
+  animation-duration: 160ms;
+  transition-duration: 120ms;
+}
+
+html[data-animations='enhanced'] * {
+  transition-duration: 300ms;
+}
+
+html[data-animations='enhanced'] .animate-material-in {
+  animation-duration: 450ms;
 }
 
 @keyframes progress {

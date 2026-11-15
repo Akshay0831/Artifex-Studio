@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 from services.api_service import api_service
+from services.local_model_service import LOCAL_MODEL_PROVIDERS
 from utils.dependency_manager import get_current_user
 from routes.api_management.api_management import (
     check_profile_rate_limit,
@@ -25,6 +26,8 @@ class GenerationRequest(BaseModel):
     size: Optional[str] = Field(None, pattern=r'^\d+x\d+$')
     batch_size: Optional[int] = Field(None, ge=1, le=10)
     seed: Optional[int] = Field(None, ge=0, le=4294967295)
+    temperature: Optional[float] = Field(None, ge=0, le=2)
+    system_prompt: Optional[str] = Field(None, max_length=1000)
     generation_type: str = Field(..., pattern=r'^(image|audio|text)$')
 
 class GenerationResponse(BaseModel):
@@ -103,6 +106,26 @@ async def generate_content(
         generation_params['batch_size'] = request.batch_size
     if request.seed is not None:
         generation_params['seed'] = request.seed
+    if request.temperature is not None:
+        generation_params['temperature'] = request.temperature
+    if request.system_prompt is not None:
+        if (
+            request.generation_type != "text"
+            or profile["api_type"] not in LOCAL_MODEL_PROVIDERS
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="System prompts are currently supported only for local text generation.",
+            )
+        generation_params['system_prompt'] = request.system_prompt
+    if profile["api_type"] in LOCAL_MODEL_PROVIDERS:
+        if request.generation_type != "text":
+            raise HTTPException(
+                status_code=400,
+                detail=f"{profile['api_type']} profiles currently support text generation only.",
+            )
+        generation_params["provider_config"] = profile
+        generation_params.setdefault("temperature", profile.get("temperature", 0.3))
     
     # Make the generation request
     try:
@@ -130,7 +153,9 @@ async def generate_content(
             )
             raise HTTPException(
                 status_code=502,
-                detail="Generation provider request failed",
+                detail=result.get("message", "Generation provider request failed")
+                if profile["api_type"] in LOCAL_MODEL_PROVIDERS
+                else "Generation provider request failed",
             )
         if status not in {"pending", "processing", "completed"}:
             logger.error("Generation service returned an unsupported status: %r", status)
@@ -170,7 +195,7 @@ async def generate_content(
 @router.get("/models")
 async def get_available_models(api_type: str, current_user = Depends(get_current_user)):
     """Get available models for a specific API provider"""
-    if api_type not in ['replicate', 'runpod', 'openai']:
+    if api_type not in ['replicate', 'runpod', 'openai', 'ollama', 'lm_studio']:
         raise HTTPException(status_code=400, detail="Invalid API provider")
     
     models = api_service.get_available_models(api_type)
@@ -180,7 +205,7 @@ async def get_available_models(api_type: str, current_user = Depends(get_current
 async def get_providers(current_user = Depends(get_current_user)):
     """Get all available API providers"""
     providers = {}
-    for api_type in ['replicate', 'runpod', 'openai']:
+    for api_type in ['replicate', 'runpod', 'openai', 'ollama', 'lm_studio']:
         provider_info = api_service.get_provider_info(api_type)
         if provider_info:
             providers[api_type] = provider_info
@@ -226,7 +251,7 @@ async def get_generation_types(current_user = Depends(get_current_user)):
 async def get_model_config(model_id: str, current_user = Depends(get_current_user)):
     """Get configuration for a specific model"""
     # Search across all providers for this model
-    for api_type in ['replicate', 'runpod', 'openai']:
+    for api_type in ['replicate', 'runpod', 'openai', 'ollama', 'lm_studio']:
         config = api_service.get_model_config(api_type, model_id)
         if config:
             return {

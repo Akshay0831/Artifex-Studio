@@ -17,6 +17,47 @@ class PaletteService:
     """Applies deterministic palette constraints to generated PNG-compatible images."""
 
     @staticmethod
+    def extract_palette(image_data: bytes, max_colors: int) -> list[str]:
+        if not 1 <= max_colors <= 256:
+            raise PaletteProcessingError("Palette color count must be between 1 and 256")
+
+        try:
+            with Image.open(io.BytesIO(image_data)) as opened_image:
+                opened_image.load()
+                pixels = np.asarray(opened_image.convert("RGBA"))
+        except (OSError, ValueError) as error:
+            raise PaletteProcessingError("Reference is not a valid image") from error
+
+        visible_pixels = pixels[pixels[:, :, 3] > 0, :3]
+        if visible_pixels.size == 0:
+            raise PaletteProcessingError("Reference image has no visible pixels")
+
+        sample = Image.fromarray(visible_pixels.reshape(1, -1, 3))
+        indexed_image = sample.quantize(
+            colors=max_colors,
+            method=Image.Quantize.MEDIANCUT,
+            dither=Image.Dither.NONE,
+        )
+        indices, counts = np.unique(
+            np.asarray(indexed_image), return_counts=True
+        )
+        image_palette = indexed_image.getpalette() or []
+        color_counts: Dict[Tuple[int, int, int], int] = {}
+        for index, count in zip(indices.tolist(), counts.tolist()):
+            offset = int(index) * 3
+            color = tuple(image_palette[offset:offset + 3])
+            color_counts[color] = color_counts.get(color, 0) + int(count)
+
+        ordered_colors = sorted(
+            color_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        return [
+            f"#{red:02X}{green:02X}{blue:02X}"
+            for (red, green, blue), _count in ordered_colors
+        ]
+
+    @staticmethod
     def apply(
         image_base64: str,
         settings: Union[ImagePaletteSettings, Dict[str, Any]],
@@ -33,6 +74,7 @@ class PaletteService:
                 "colors": [],
                 "alpha_preserved": False,
                 "dither": False,
+                "source_reference": None,
             }
 
         encoded_image = image_base64.split(",", 1)[-1]
@@ -100,6 +142,11 @@ class PaletteService:
             "opaque_color_count": len(output_colors),
             "alpha_preserved": preserve_alpha,
             "dither": palette_settings.dither,
+            "source_reference": (
+                palette_settings.source_reference.model_dump(mode="json")
+                if palette_settings.source_reference is not None
+                else None
+            ),
         }
 
 

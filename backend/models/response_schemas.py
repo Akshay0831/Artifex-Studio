@@ -1,5 +1,8 @@
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+
+from models.request_schemas import PaletteSourceReference
 
 class ImageResponse(BaseModel):
     image_base64: str
@@ -13,6 +16,12 @@ class AudioResponse(BaseModel):
     seed: int
     backend: str
     metadata: Optional[Dict[str, Any]] = None
+
+
+class ReferencePaletteResponse(BaseModel):
+    source_reference: PaletteSourceReference
+    max_colors: int
+    colors: List[str]
 
 class HealthCheck(BaseModel):
     status: str

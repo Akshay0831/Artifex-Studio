@@ -2,10 +2,12 @@ export interface ApiProfile {
   id: string
   name: string
   api_key: string
-  api_type: 'replicate' | 'runpod' | 'openai'
+  api_type: 'replicate' | 'runpod' | 'openai' | 'ollama' | 'lm_studio'
+  base_url?: string | null
   is_active: boolean
   models: string[]
   default_model: string | null
+  temperature?: number
   rate_limit: number
   usage_count: number
   last_used: string | null
@@ -58,12 +60,16 @@ export interface GenerationRequest {
   prompt: string
   model: string
   api_profile?: string
+  api_profile_id?: string
+  generation_type?: 'image' | 'audio' | 'text'
   negative_prompt?: string
   steps?: number
   cfg?: number
   size?: string
   batch_size?: number
   seed?: number
+  temperature?: number
+  system_prompt?: string
 }
 
 export interface GenerationResponse {
@@ -73,12 +79,22 @@ export interface GenerationResponse {
   error?: string
   progress: number
   estimated_time?: number
-  api_used: string
-  model_used: string
-  cost?: number
-  metadata?: {
-    [key: string]: any
-  }
+  api_profile_id?: string
+  model: string
+  prompt: string
+  timestamp: string
+}
+
+export interface LocalModelOption {
+  id: string
+  name: string
+  type: 'text'
+}
+
+export interface LocalModelDiscoveryResponse {
+  api_type: 'ollama' | 'lm_studio'
+  capabilities: string[]
+  models: LocalModelOption[]
 }
 
 export type ReferenceRole = 'style' | 'composition' | 'subject' | 'palette'
@@ -90,6 +106,20 @@ export interface ImagePaletteSettings {
   max_colors: number | null
   dither: boolean
   preserve_alpha: boolean
+  source_reference?: ImagePaletteSourceReference | null
+}
+
+export interface ImagePaletteSourceReference {
+  project_id: string
+  reference_id: string
+  sha256: string
+  original_filename: string
+}
+
+export interface ExtractedReferencePalette {
+  source_reference: ImagePaletteSourceReference
+  max_colors: number
+  colors: string[]
 }
 
 export interface ArtGenerationRequest {

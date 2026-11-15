@@ -17,6 +17,8 @@ export const useProjectConfig = () => {
   const [stylePreset, setStylePreset] = useState(yProjectConfig.get('stylePreset') as string);
   const [autoSyncAudio, setAutoSyncAudio] = useState(yProjectConfig.get('autoSyncAudio') as boolean);
   const [sceneMetadata, setSceneMetadata] = useState<any>((yProjectConfig.get('sceneMetadata') as Y.Map<any>)?.toJSON() || {});
+  const [isAnalyzingScene, setIsAnalyzingScene] = useState(false);
+  const [sceneAnalysisError, setSceneAnalysisError] = useState<string | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -42,17 +44,31 @@ export const useProjectConfig = () => {
 
   const analyzeScene = useCallback(() => {
     const baseImage = yImage.get('baseImageData');
-    if (!baseImage) return;
+    if (typeof baseImage !== 'string' || !baseImage) {
+      setSceneAnalysisError('Add an image to the canvas before requesting scene analysis.');
+      return;
+    }
 
-    sendMessage({
-      type: 'analyze_scene',
-      image_b64: baseImage
-    });
+    try {
+      sendMessage({
+        type: 'analyze_scene',
+        image_b64: baseImage
+      });
+      setSceneAnalysisError(null);
+      setIsAnalyzingScene(true);
+    } catch (error) {
+      setSceneAnalysisError(
+        error instanceof Error ? error.message : 'Could not send the scene analysis request.',
+      );
+      setIsAnalyzingScene(false);
+    }
   }, [sendMessage, yImage]);
 
   // Handle incoming analysis results
   useEffect(() => {
     if (lastMessage?.type === 'scene_analysis_complete') {
+      setIsAnalyzingScene(false);
+      setSceneAnalysisError(null);
       const { analysis } = lastMessage;
       
       const metadataMap = yProjectConfig.get('sceneMetadata') as any;
@@ -67,6 +83,13 @@ export const useProjectConfig = () => {
         if (audioConfig.composer) yAudio.set('composer', audioConfig.composer);
         if (audioConfig.bpm) yAudio.set('bpm', audioConfig.bpm);
       }
+    } else if (lastMessage?.type === 'error' && lastMessage.operation === 'analyze_scene') {
+      setIsAnalyzingScene(false);
+      setSceneAnalysisError(
+        typeof lastMessage.message === 'string'
+          ? lastMessage.message
+          : 'Scene analysis failed.',
+      );
     }
   }, [lastMessage, autoSyncAudio, yProjectConfig, yAudio]);
 
@@ -74,6 +97,8 @@ export const useProjectConfig = () => {
     stylePreset,
     autoSyncAudio,
     sceneMetadata,
+    isAnalyzingScene,
+    sceneAnalysisError,
     updateConfig,
     refinePrompt,
     analyzeScene

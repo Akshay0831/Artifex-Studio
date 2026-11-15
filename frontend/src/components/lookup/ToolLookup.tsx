@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, ChevronDown, ChevronUp, Grid, List, Filter, Star } from 'lucide-react';
+import { Search, X, ChevronDown, ChevronUp, Grid, List, Star } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { MaterialButton } from '../common/MaterialButton';
 
@@ -43,13 +43,14 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
   const [showGrid, setShowGrid] = useState(false);
   const [filteredTools, setFilteredTools] = useState<Tool[]>(tools);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Extract unique categories
   const categories = showCategories ? [...new Set(tools.map(tool => tool.category))] : [];
 
   // Filter tools based on search term and category
   useEffect(() => {
-    let filtered = tools;
+    let filtered = [...tools];
 
     // Filter by search term
     if (searchTerm) {
@@ -78,6 +79,17 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
     setFilteredTools(filtered);
   }, [tools, searchTerm, selectedCategory, showPopular]);
 
+  useEffect(() => {
+    if (!compact || !isExpanded) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsExpanded(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [compact, isExpanded]);
+
   const handleToolClick = (tool: Tool) => {
     onToolSelect(tool.id);
     if (compact) {
@@ -96,7 +108,7 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
   };
 
   return (
-    <div className={cn(
+    <div ref={containerRef} className={cn(
       "relative w-full max-w-md",
       compact && "w-full"
     )}>
@@ -114,15 +126,19 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
           ref={inputRef}
           type="text"
           placeholder={getSelectedTool()?.name || placeholder}
-          value={getSelectedTool()?.name || searchTerm}
+          value={isExpanded ? searchTerm : getSelectedTool()?.name || searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          onFocus={() => setIsExpanded(true)}
+          onFocus={() => {
+            setIsExpanded(true);
+            setSearchTerm('');
+          }}
           onKeyDown={handleKeyDown}
           className={cn(
-            "flex-1 bg-transparent outline-none text-sm placeholder-studio-text-dim",
+            "min-w-0 flex-1 bg-transparent outline-none text-sm placeholder-studio-text-dim",
             compact && "w-full"
           )}
           onClick={(e) => e.stopPropagation()}
+          aria-label="Search tools"
         />
         {getSelectedTool() && (
           <button
@@ -165,6 +181,8 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
                 size="icon"
                 onClick={() => setShowGrid(!showGrid)}
                 className="p-1"
+                aria-label={showGrid ? 'Use list view' : 'Use grid view'}
+                title={showGrid ? 'Use list view' : 'Use grid view'}
               >
                 {showGrid ? <List size={14} /> : <Grid size={14} />}
               </MaterialButton>
@@ -173,6 +191,7 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
                   className="bg-studio-background border border-studio-border rounded px-2 py-1 text-sm outline-none focus:outline-none focus:ring-1 focus:ring-studio-accent"
+                  aria-label="Filter tools by category"
                 >
                   <option value="all">All Categories</option>
                   {categories.map(category => (
@@ -218,14 +237,14 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
                       key={tool.id}
                       onClick={() => handleToolClick(tool)}
                       className={cn(
-                        "flex flex-col items-center gap-2 p-3 rounded-lg text-left transition-all",
+                        "flex min-w-0 flex-col items-center gap-2 p-3 rounded-lg text-left transition-all",
                         selectedTool === tool.id ? "bg-studio-accent text-white" : "bg-studio-hover hover:bg-studio-hover"
                       )}
                     >
                       <tool.icon size={20} />
                       <div className="text-center">
-                        <div className="text-sm font-medium">{tool.name}</div>
-                        <div className="text-xs text-studio-text-dim">{tool.category}</div>
+                        <div className="max-w-full whitespace-normal break-words text-sm font-medium">{tool.name}</div>
+                        <div className="max-w-full whitespace-normal break-words text-xs text-studio-text-dim">{tool.category}</div>
                       </div>
                     </button>
                   ))}
@@ -238,17 +257,17 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
                     key={tool.id}
                     onClick={() => handleToolClick(tool)}
                     className={cn(
-                      "w-full p-3 text-left transition-all flex items-center gap-3",
+                      "flex w-full min-w-0 items-center gap-3 p-3 text-left transition-all",
                       selectedTool === tool.id ? "bg-studio-accent text-white" : "hover:bg-studio-hover"
                     )}
                   >
                     <tool.icon size={18} />
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">{tool.name}</span>
+                        <span className="whitespace-normal break-words font-medium">{tool.name}</span>
                         {tool.popular && <Star size={12} className="text-yellow-400" />}
                       </div>
-                      <div className="text-sm text-studio-text-dim">{tool.description}</div>
+                      <div className="whitespace-normal break-words text-sm text-studio-text-dim">{tool.description}</div>
                       <div className="text-xs text-studio-text-dim mt-1">{tool.category}</div>
                     </div>
                   </button>
@@ -266,13 +285,6 @@ const ToolLookup: React.FC<ToolLookupProps> = ({
         </div>
       )}
 
-      {/* Click outside to close */}
-      {isExpanded && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setIsExpanded(false)}
-        />
-      )}
     </div>
   );
 };

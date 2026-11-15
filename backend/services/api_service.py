@@ -7,6 +7,11 @@ from collections import deque
 from typing import Deque, Dict, Any, Optional, List
 from datetime import datetime, timezone
 from enum import Enum
+from services.local_model_service import (
+    LOCAL_MODEL_PROVIDERS,
+    LocalModelError,
+    local_model_service,
+)
 
 logger = logging.getLogger("studio.backend.services.api_service")
 
@@ -83,6 +88,26 @@ class ApiService:
                         'default_prompt': '',
                         'max_tokens': 4096
                     }
+                },
+                'ollama': {
+                    'base_url': 'http://127.0.0.1:11434',
+                    'models_endpoint': '/api/tags',
+                    'headers': {'Content-Type': 'application/json'},
+                    'rate_limits': {
+                        'requests_per_minute': 60,
+                        'requests_per_hour': 1000
+                    },
+                    'model_configs': {}
+                },
+                'lm_studio': {
+                    'base_url': 'http://127.0.0.1:1234/v1',
+                    'models_endpoint': '/models',
+                    'headers': {'Content-Type': 'application/json'},
+                    'rate_limits': {
+                        'requests_per_minute': 60,
+                        'requests_per_hour': 1000
+                    },
+                    'model_configs': {}
                 }
             }
         }
@@ -183,8 +208,37 @@ class ApiService:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
     
-    async def generate_text(self, profile_id: str, model: str, prompt: str, **kwargs) -> Dict[str, Any]:
+    async def generate_text(
+        self,
+        profile_id: str,
+        model: str,
+        prompt: str,
+        provider_config: Optional[Dict[str, Any]] = None,
+        temperature: float = 0.4,
+        system_prompt: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
         """Generate text using selected API profile"""
+        api_type = provider_config.get('api_type') if provider_config else None
+        if api_type in LOCAL_MODEL_PROVIDERS:
+            try:
+                result = await local_model_service.generate_text(
+                    provider=api_type,
+                    base_url=provider_config.get('base_url') or '',
+                    model=model,
+                    prompt=prompt,
+                    temperature=temperature,
+                    system_prompt=system_prompt,
+                )
+            except (LocalModelError, ValueError) as error:
+                return {
+                    'status': 'error',
+                    'error_code': 'provider_error',
+                    'message': str(error),
+                }
+            result['api_profile'] = profile_id
+            return result
+
         # This would integrate with the actual generation services
         # For now, return a mock response
         return {
@@ -204,6 +258,15 @@ class ApiService:
                 'status': 'error',
                 'message': 'Rate limit exceeded. Please try again later.',
                 'error_code': 'rate_limited'
+            }
+
+        provider_config = kwargs.get('provider_config')
+        api_type = provider_config.get('api_type') if isinstance(provider_config, dict) else None
+        if api_type in LOCAL_MODEL_PROVIDERS and generation_type != 'text':
+            return {
+                'status': 'error',
+                'error_code': 'unsupported_type',
+                'message': f'{api_type} profiles currently support text generation only.',
             }
         
         # Route to appropriate generation method
@@ -267,6 +330,8 @@ class ApiService:
             return ['image', 'audio', 'text']
         elif api_type == 'openai':
             return ['image', 'text', 'audio']
+        elif api_type in LOCAL_MODEL_PROVIDERS:
+            return ['text']
         return []
 
 # Global service instance

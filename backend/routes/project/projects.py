@@ -1,12 +1,17 @@
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
+from models.response_schemas import ReferencePaletteResponse
+from services.palette_service import PaletteProcessingError, palette_service
 from services.project_asset_service import (
     ProjectNotFoundError,
     ProjectBundleInvalidError,
+    ProjectEditorStateInvalidError,
+    ProjectEditorStateTooLargeError,
     ReferenceTooLargeError,
     ReferenceNotFoundError,
     ReferenceProcessingUnavailableError,
@@ -84,6 +89,43 @@ async def list_projects():
     """List all projects"""
     projects = project_asset_service.list_projects()
     return {"projects": projects, "total": len(projects)}
+
+
+@router.get("/{project_id}/editor-state")
+async def get_project_editor_state(project_id: str):
+    try:
+        editor_state = project_asset_service.get_editor_state(project_id)
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except ProjectEditorStateInvalidError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ProjectEditorStateTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    if editor_state is None:
+        return Response(status_code=204)
+    return Response(content=editor_state, media_type="application/octet-stream")
+
+
+@router.put("/{project_id}/editor-state")
+async def save_project_editor_state(project_id: str, request: Request):
+    editor_state = bytearray()
+    async for chunk in request.stream():
+        if len(editor_state) + len(chunk) > project_asset_service.max_editor_state_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="Editor state exceeds the configured byte limit",
+            )
+        editor_state.extend(chunk)
+    try:
+        project_asset_service.save_editor_state(project_id, bytes(editor_state))
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except ProjectEditorStateInvalidError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ProjectEditorStateTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    return {"status": "saved", "size_bytes": len(editor_state)}
+
 
 @router.get("/{project_id}/bundle")
 async def export_project_bundle(project_id: str):
@@ -177,6 +219,50 @@ async def get_reference_content(project_id: str, reference_id: str):
         filename=reference["original_filename"],
         content_disposition_type="inline",
     )
+
+
+@router.get(
+    "/{project_id}/references/{reference_id}/palette",
+    response_model=ReferencePaletteResponse,
+)
+async def extract_reference_palette(
+    project_id: str,
+    reference_id: str,
+    max_colors: int = Query(16, ge=1, le=256),
+):
+    try:
+        reference = project_asset_service.get_reference(project_id, reference_id)
+        if reference["media_type"] != "image":
+            raise HTTPException(
+                status_code=415,
+                detail="Only image references support palette extraction",
+            )
+        content_path = project_asset_service.reference_content_path(
+            project_id, reference_id
+        )
+        colors = await run_in_threadpool(
+            lambda: palette_service.extract_palette(
+                content_path.read_bytes(), max_colors
+            )
+        )
+        return ReferencePaletteResponse(
+            source_reference={
+                "project_id": reference["project_id"],
+                "reference_id": reference["id"],
+                "sha256": reference["sha256"],
+                "original_filename": reference["original_filename"],
+            },
+            max_colors=max_colors,
+            colors=colors,
+        )
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Project not found") from error
+    except ReferenceNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Reference not found") from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Reference content not found") from error
+    except PaletteProcessingError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.delete("/{project_id}/references/{reference_id}")

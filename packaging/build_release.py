@@ -84,6 +84,7 @@ def _smoke_test(executable: Path, version: str, timeout: int) -> None:
                             for name in ("projects", "config", "output", "models")
                         ):
                             raise RuntimeError("Packaged app did not create its user data folders.")
+                        _smoke_test_websocket(port)
                         print(f"Packaged app smoke test passed: {version}")
                         return
                     except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
@@ -101,6 +102,25 @@ def _smoke_test(executable: Path, version: str, timeout: int) -> None:
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
+
+
+def _smoke_test_websocket(port: int) -> None:
+    import asyncio
+    import websockets
+
+    async def connect():
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/ws",
+            open_timeout=5,
+        ):
+            return
+
+    try:
+        asyncio.run(connect())
+    except Exception as error:
+        raise RuntimeError(
+            "Packaged app health check passed, but its WebSocket endpoint is unavailable."
+        ) from error
 
 
 def build_release(version: str, timeout: int) -> Path:
@@ -128,7 +148,7 @@ def build_release(version: str, timeout: int) -> Path:
         "--add-data",
         f"{ROOT / 'frontend' / 'dist'}{os.pathsep}frontend/dist",
     ]
-    for package in ("torch", "diffusers", "transformers", "librosa"):
+    for package in ("torch", "diffusers", "transformers", "librosa", "websockets"):
         command.extend(["--collect-all", package])
     for module in (
         "extensions.art_extension",
@@ -141,6 +161,7 @@ def build_release(version: str, timeout: int) -> Path:
         "uvicorn.loops.auto",
         "uvicorn.protocols.http.auto",
         "uvicorn.protocols.websockets.auto",
+        "uvicorn.protocols.websockets.websockets_impl",
         "uvicorn.lifespan.on",
     ):
         command.extend(["--hidden-import", module])

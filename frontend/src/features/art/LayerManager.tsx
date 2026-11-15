@@ -8,19 +8,15 @@ import {
   Unlock, 
   Eye, 
   EyeOff, 
-  ChevronUp, 
-  ChevronDown, 
-  MoreVertical,
   Trash2,
   ArrowUp,
   ArrowDown,
-  X,
-  Plus
+  Plus,
+  Copy,
+  Sliders
 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
-import { Layer, LayerGroup, ToolType } from './types';
+import { Layer, ToolType } from './types';
 
-// Props interface
 interface LayerManagerProps {
   canvas: Canvas | null;
   onLayerSelect?: (layer: Layer | null) => void;
@@ -28,379 +24,417 @@ interface LayerManagerProps {
   toolSettings?: any;
 }
 
-const LayerManager: React.FC<LayerManagerProps> = ({ canvas, onLayerSelect, selectedTool, toolSettings }) => {
-  const { t } = useTranslation();
-  const [layers, setLayers] = useState<Layer[]>([]);
-  const [showLayers, setShowLayers] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStartY, setDragStartY] = useState(0);
-  const [dragStartIndex, setDragStartIndex] = useState(0);
-  const [dragDirection, setDragDirection] = useState<'up' | 'down' | null>(null);
-  const [editingLayer, setEditingLayer] = useState<string | null>(null);
-  const [tempLayerName, setTempLayerName] = useState('');
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    layerId: string | null;
-  }>({
-    visible: false,
-    x: 0,
-    y: 0,
-    layerId: null
-  });
-  const [transformControlsOpen, setTransformControlsOpen] = useState(false);
-  const [currentTransformLayer, setCurrentTransformLayer] = useState<{
-    id: string;
-    obj: fabric.Object;
-  } | null>(null);
+const BLEND_MODES: { label: string; value: GlobalCompositeOperation }[] = [
+  { label: 'Normal', value: 'source-over' },
+  { label: 'Multiply', value: 'multiply' },
+  { label: 'Screen', value: 'screen' },
+  { label: 'Overlay', value: 'overlay' },
+  { label: 'Darken', value: 'darken' },
+  { label: 'Lighten', value: 'lighten' },
+  { label: 'Color Dodge', value: 'color-dodge' },
+  { label: 'Color Burn', value: 'color-burn' },
+  { label: 'Hard Light', value: 'hard-light' },
+  { label: 'Soft Light', value: 'soft-light' },
+  { label: 'Difference', value: 'difference' },
+  { label: 'Exclusion', value: 'exclusion' },
+];
 
-  // Initialize layers
+const LayerManager: React.FC<LayerManagerProps> = ({ canvas, onLayerSelect }) => {
+  const [layers, setLayers] = useState<Layer[]>([]);
+  const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
+  const [tempLayerName, setTempLayerName] = useState('');
+
+  // Sync state from Fabric canvas objects
+  const updateLayersFromCanvas = useCallback(() => {
+    if (!canvas) return;
+    const canvasLayers: Layer[] = [];
+    const objects = canvas.getObjects();
+
+    objects.forEach((obj, index) => {
+      const isSelected = canvas.getActiveObject() === obj;
+      canvasLayers.push({
+        id: `layer-${index}`,
+        name: (obj as any).layerName || `Layer ${index + 1}`,
+        visible: obj.visible !== false,
+        locked: !obj.selectable,
+        opacity: typeof obj.opacity === 'number' ? obj.opacity : 1,
+        blendMode: (obj.globalCompositeOperation as string) || 'source-over',
+        selected: isSelected,
+      });
+    });
+
+    setLayers(canvasLayers);
+
+    const activeObj = canvas.getActiveObject();
+    if (activeObj) {
+      const idx = objects.indexOf(activeObj);
+      if (idx !== -1) setSelectedLayerIndex(idx);
+    }
+  }, [canvas]);
+
   useEffect(() => {
     if (!canvas) return;
 
-    const updateLayers = () => {
-      const canvasLayers: Layer[] = [];
-      const objects = canvas.getObjects();
-      
-      objects.forEach((obj, index) => {
-        canvasLayers.push({
-          id: `layer-${index}`,
-          name: `Layer ${index + 1}`,
-          visible: obj.visible !== false,
-          locked: false,
-          opacity: obj.opacity || 1,
-          blendMode: obj.globalCompositeOperation || 'source-over',
-          selected: false
-        });
-      });
-
-      setLayers(canvasLayers);
-    };
-
-    updateLayers();
-    canvas.on('object:added', updateLayers);
-    canvas.on('object:modified', updateLayers);
-    canvas.on('object:removed', updateLayers);
+    updateLayersFromCanvas();
+    canvas.on('object:added', updateLayersFromCanvas);
+    canvas.on('object:modified', updateLayersFromCanvas);
+    canvas.on('object:removed', updateLayersFromCanvas);
+    canvas.on('selection:created', updateLayersFromCanvas);
+    canvas.on('selection:updated', updateLayersFromCanvas);
+    canvas.on('selection:cleared', updateLayersFromCanvas);
 
     return () => {
-      canvas.off('object:added', updateLayers);
-      canvas.off('object:modified', updateLayers);
-      canvas.off('object:removed', updateLayers);
+      canvas.off('object:added', updateLayersFromCanvas);
+      canvas.off('object:modified', updateLayersFromCanvas);
+      canvas.off('object:removed', updateLayersFromCanvas);
+      canvas.off('selection:created', updateLayersFromCanvas);
+      canvas.off('selection:updated', updateLayersFromCanvas);
+      canvas.off('selection:cleared', updateLayersFromCanvas);
     };
-  }, [canvas]);
+  }, [canvas, updateLayersFromCanvas]);
 
-  // Layer operations
+  // Create a new blank vector rectangle layer
   const createLayer = () => {
     if (!canvas) return;
-
     const rect = new fabric.Rect({
-      width: 100,
-      height: 100,
-      fill: `#${Math.floor(Math.random()*16777215).toString(16)}`,
-      left: 50,
-      top: 50
+      width: 120,
+      height: 120,
+      fill: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`,
+      left: 100,
+      top: 100,
+      opacity: 1,
     });
-
+    (rect as any).layerName = `Layer ${canvas.getObjects().length + 1}`;
     canvas.add(rect);
+    canvas.setActiveObject(rect);
     canvas.renderAll();
   };
 
-  const deleteLayer = (layerId: string) => {
+  const selectLayerByIndex = (index: number) => {
     if (!canvas) return;
-
-    const layerIndex = layers.findIndex(layer => layer.id === layerId);
-    if (layerIndex >= 0 && layerIndex < canvas.getObjects().length) {
-      canvas.remove(canvas.getObjects()[layerIndex]);
+    const objects = canvas.getObjects();
+    const targetObj = objects[index];
+    if (targetObj) {
+      canvas.setActiveObject(targetObj);
       canvas.renderAll();
+      setSelectedLayerIndex(index);
+      if (onLayerSelect) {
+        onLayerSelect(layers[index] || null);
+      }
     }
   };
 
-  const toggleLayerVisibility = (layerId: string) => {
+  const toggleLayerVisibility = (index: number) => {
     if (!canvas) return;
-
-    const layerIndex = layers.findIndex(layer => layer.id === layerId);
-    if (layerIndex >= 0 && layerIndex < canvas.getObjects().length) {
-      const obj = canvas.getObjects()[layerIndex];
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (obj) {
       obj.set({ visible: !obj.visible });
       canvas.renderAll();
+      updateLayersFromCanvas();
     }
   };
 
-  const toggleLayerLock = (layerId: string) => {
+  const toggleLayerLock = (index: number) => {
     if (!canvas) return;
-
-    const layerIndex = layers.findIndex(layer => layer.id === layerId);
-    if (layerIndex >= 0 && layerIndex < canvas.getObjects().length) {
-      const obj = canvas.getObjects()[layerIndex];
-      obj.set({ selectable: false });
-      canvas.renderAll();
-    }
-  };
-
-  const selectLayer = (layerId: string) => {
-    const updatedLayers = layers.map(layer => ({
-      ...layer,
-      selected: layer.id === layerId
-    }));
-    setLayers(updatedLayers);
-
-    if (onLayerSelect) {
-      const selectedLayer = layers.find(layer => layer.id === layerId);
-      onLayerSelect(selectedLayer || null);
-    }
-  };
-
-  const moveLayer = (layerId: string, direction: 'up' | 'down') => {
-    if (!canvas) return;
-
-    const layerIndex = layers.findIndex(layer => layer.id === layerId);
-    if (layerIndex < 0 || layerIndex >= canvas.getObjects().length) return;
-
     const objects = canvas.getObjects();
-    const obj = objects[layerIndex];
-
-    if (direction === 'up' && layerIndex > 0) {
-      const objects = canvas.getObjects();
-      objects.splice(layerIndex, 1);
-      objects.splice(layerIndex - 1, 0, obj);
-      canvas.clear();
-      objects.forEach(obj => canvas.add(obj));
-    } else if (direction === 'down' && layerIndex < objects.length - 1) {
-      const objects = canvas.getObjects();
-      objects.splice(layerIndex, 1);
-      objects.splice(layerIndex + 1, 0, obj);
-      canvas.clear();
-      objects.forEach(obj => canvas.add(obj));
+    const obj = objects[index];
+    if (obj) {
+      const isLocked = !obj.selectable;
+      obj.set({ selectable: isLocked, evented: isLocked });
+      canvas.renderAll();
+      updateLayersFromCanvas();
     }
+  };
 
+  const deleteLayerByIndex = (index: number) => {
+    if (!canvas) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (obj) {
+      canvas.remove(obj);
+      canvas.renderAll();
+      setSelectedLayerIndex(null);
+      if (onLayerSelect) onLayerSelect(null);
+      updateLayersFromCanvas();
+    }
+  };
+
+  const duplicateLayerByIndex = async (index: number) => {
+    if (!canvas) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (!obj) return;
+
+    try {
+      const cloned = await obj.clone();
+      cloned.set({
+        left: (cloned.left || 0) + 20,
+        top: (cloned.top || 0) + 20,
+        evented: true,
+      });
+      (cloned as any).layerName = `${(obj as any).layerName || `Layer ${index + 1}`} Copy`;
+      canvas.add(cloned);
+      canvas.setActiveObject(cloned);
+      canvas.renderAll();
+      updateLayersFromCanvas();
+    } catch (e) {
+      console.warn('Layer duplicate error', e);
+    }
+  };
+
+  const moveLayer = (index: number, direction: 'up' | 'down') => {
+    if (!canvas) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (!obj) return;
+
+    if (direction === 'up' && index < objects.length - 1) {
+      obj.bringForward();
+    } else if (direction === 'down' && index > 0) {
+      obj.sendBackwards();
+    }
     canvas.renderAll();
+    updateLayersFromCanvas();
   };
 
-  const showContextMenu = (e: React.MouseEvent, layerId: string) => {
-    e.preventDefault();
-    setContextMenu({
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      layerId
-    });
+  const setLayerOpacity = (index: number, opacityVal: number) => {
+    if (!canvas) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (obj) {
+      obj.set({ opacity: opacityVal });
+      canvas.renderAll();
+      updateLayersFromCanvas();
+    }
   };
 
-  // Drag handlers
-  const handleDragStart = (e: React.MouseEvent, index: number) => {
-    e.stopPropagation();
-    setIsDragging(true);
-    setDragStartY(e.clientY);
-    setDragStartIndex(index);
+  const setLayerBlendMode = (index: number, mode: GlobalCompositeOperation) => {
+    if (!canvas) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (obj) {
+      obj.set({ globalCompositeOperation: mode });
+      canvas.renderAll();
+      updateLayersFromCanvas();
+    }
   };
 
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    setDragDirection(null);
+  const saveLayerName = (index: number) => {
+    if (!canvas || !editingLayerId) return;
+    const objects = canvas.getObjects();
+    const obj = objects[index];
+    if (obj && tempLayerName.trim()) {
+      (obj as any).layerName = tempLayerName.trim();
+      setEditingLayerId(null);
+      updateLayersFromCanvas();
+    } else {
+      setEditingLayerId(null);
+    }
   };
 
-  // Render individual layer item
-  const renderLayerItem = (layer: Layer, index: number) => {
-    return (
-      <div
-        key={layer.id}
-        className={`flex items-center justify-between p-2 border-b border-studio-border hover:bg-studio-panel-hover ${
-          layer.selected ? 'bg-studio-panel-selected' : ''
-        }`}
-        onClick={() => selectLayer(layer.id)}
-      >
-        <div className="flex items-center gap-2 flex-1">
-          {/* Layer Selection */}
-          <input
-            type="checkbox"
-            checked={layer.selected}
-            onChange={(e) => {
-              e.stopPropagation();
-              const updatedLayers = layers.map(l => ({
-                ...l,
-                selected: l.id === layer.id ? e.target.checked : l.selected
-              }));
-              setLayers(updatedLayers);
-              
-              if (onLayerSelect) {
-                onLayerSelect(layer.id === layer.id ? layer : null);
-              }
-            }}
-            className="rounded border-studio-border"
-          />
-
-          {/* Layer Visibility */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleLayerVisibility(layer.id);
-            }}
-            className="p-1 hover:bg-studio-panel-hover rounded"
-            title={layer.visible ? 'Hide layer' : 'Show layer'}
-          >
-            {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-          </button>
-
-          {/* Layer Name */}
-          {editingLayer === layer.id ? (
-            <input
-              type="text"
-              value={tempLayerName}
-              onChange={(e) => setTempLayerName(e.target.value)}
-              onBlur={saveLayerName}
-              onKeyDown={(e) => e.key === 'Enter' && saveLayerName()}
-              className="flex-1 bg-studio-bg border border-studio-border rounded px-2 py-1 text-xs text-white"
-              autoFocus
-            />
-          ) : (
-            <div className="flex items-center gap-1 flex-1">
-              <span 
-                className="text-sm flex-1 cursor-pointer hover:bg-studio-panel-hover rounded px-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingLayer(layer.id);
-                  setTempLayerName(layer.name);
-                }}
-              >
-                {layer.name}
-              </span>
-            </div>
-          )}
-
-          {/* Layer Controls */}
-          <div className="flex items-center gap-1">
-            {/* Lock */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleLayerLock(layer.id);
-              }}
-              className="p-1 hover:bg-studio-panel-hover rounded"
-              title={layer.locked ? 'Unlock layer' : 'Lock layer'}
-            >
-              {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
-            </button>
-
-            {/* Move Controls */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                moveLayer(layer.id, 'up');
-              }}
-              className="p-1 hover:bg-studio-panel-hover rounded"
-              disabled={index === 0}
-              title="Move up"
-            >
-              <ArrowUp size={14} />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                moveLayer(layer.id, 'down');
-              }}
-              className="p-1 hover:bg-studio-panel-hover rounded"
-              disabled={index === layers.length - 1}
-              title="Move down"
-            >
-              <ArrowDown size={14} />
-            </button>
-
-            {/* More Actions */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                showContextMenu(e, layer.id);
-              }}
-              className="p-1 hover:bg-studio-panel-hover rounded"
-              title="More options"
-            >
-              <MoreVertical size={14} />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const saveLayerName = () => {
-    if (!editingLayer) return;
-    
-    const updatedLayers = layers.map(layer => 
-      layer.id === editingLayer ? { ...layer, name: tempLayerName } : layer
-    );
-    
-    setLayers(updatedLayers);
-    setEditingLayer(null);
-  };
-
-  const blendModes = [
-    'normal',
-    'multiply',
-    'screen',
-    'overlay',
-    'darken',
-    'lighten',
-    'color-dodge',
-    'color-burn',
-    'hard-light',
-    'soft-light',
-    'difference',
-    'exclusion',
-    'hue',
-    'saturation',
-    'color',
-    'luminosity'
-  ];
+  const activeLayer = selectedLayerIndex !== null ? layers[selectedLayerIndex] : null;
 
   return (
-    <div className="w-full h-full bg-studio-bg flex flex-col">
-      {/* Enhanced Layer Management Header */}
-      <div className="flex items-center justify-between p-3 border-b border-studio-border bg-studio-panel-hover">
+    <div className="w-full h-full bg-studio-background flex flex-col text-studio-text select-none">
+      {/* Header */}
+      <div className="flex items-center justify-between p-3 border-b border-studio-border bg-studio-header">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowLayers(!showLayers)}
-            className="p-2 hover:bg-studio-panel-hover rounded-lg"
-          >
-            {showLayers ? <FolderOpen size={18} /> : <Folder size={18} />}
-          </button>
-          <span className="text-sm font-medium text-studio-text">Layers</span>
-          <span className="text-xs text-studio-text-dim bg-studio-panel px-2 py-1 rounded-full">
+          <FolderOpen size={16} className="text-studio-accent" />
+          <span className="text-xs font-bold uppercase tracking-wider text-studio-text">Layers</span>
+          <span className="text-[10px] text-studio-text-dim bg-studio-panel px-1.5 py-0.5 rounded-full border border-studio-border">
             {layers.length}
           </span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={createLayer}
-            className="p-2 hover:bg-studio-panel-hover rounded-lg text-green-400"
-            title="New layer"
+            className="p-1 hover:bg-studio-hover rounded text-studio-accent transition-colors"
+            title="Create new layer"
+            type="button"
           >
-            <Plus size={18} />
+            <Plus size={16} />
           </button>
         </div>
       </div>
 
-      {/* Layer List */}
-      <div className="flex-1 overflow-y-auto">
-        {layers.map((layer, index) => renderLayerItem(layer, index))}
+      {/* Layer List - rendered in reverse stack order (top layer at top) */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-1 space-y-1">
+        {layers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-8 text-center text-xs text-studio-text-dim">
+            <span>No layers on canvas</span>
+            <button
+              onClick={createLayer}
+              className="mt-2 text-[11px] text-studio-accent hover:underline"
+              type="button"
+            >
+              Add a layer to start
+            </button>
+          </div>
+        ) : (
+          layers
+            .map((layer, index) => ({ layer, index }))
+            .reverse()
+            .map(({ layer, index }) => {
+              const isSelected = selectedLayerIndex === index;
+              return (
+                <div
+                  key={layer.id}
+                  onClick={() => selectLayerByIndex(index)}
+                  className={`flex items-center justify-between p-2 rounded border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-studio-panel-selected border-studio-accent shadow-sm'
+                      : 'bg-studio-panel border-studio-border hover:bg-studio-hover'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {/* Visibility */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLayerVisibility(index);
+                      }}
+                      className="p-1 text-studio-text-dim hover:text-studio-text rounded"
+                      title={layer.visible ? 'Hide layer' : 'Show layer'}
+                    >
+                      {layer.visible ? <Eye size={13} /> : <EyeOff size={13} className="text-red-400" />}
+                    </button>
+
+                    {/* Lock */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLayerLock(index);
+                      }}
+                      className="p-1 text-studio-text-dim hover:text-studio-text rounded"
+                      title={layer.locked ? 'Unlock layer' : 'Lock layer'}
+                    >
+                      {layer.locked ? <Lock size={13} className="text-amber-400" /> : <Unlock size={13} />}
+                    </button>
+
+                    {/* Name */}
+                    {editingLayerId === layer.id ? (
+                      <input
+                        type="text"
+                        value={tempLayerName}
+                        onChange={(e) => setTempLayerName(e.target.value)}
+                        onBlur={() => saveLayerName(index)}
+                        onKeyDown={(e) => e.key === 'Enter' && saveLayerName(index)}
+                        className="flex-1 bg-black/50 border border-studio-accent rounded px-1.5 py-0.5 text-xs text-white outline-none"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span
+                        className="text-xs font-medium truncate flex-1 hover:underline"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setEditingLayerId(layer.id);
+                          setTempLayerName(layer.name);
+                        }}
+                        title="Double-click to rename"
+                      >
+                        {layer.name}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(index, 'up');
+                      }}
+                      disabled={index === layers.length - 1}
+                      className="p-1 text-studio-text-dim hover:text-studio-text disabled:opacity-20"
+                      title="Move up"
+                    >
+                      <ArrowUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(index, 'down');
+                      }}
+                      disabled={index === 0}
+                      className="p-1 text-studio-text-dim hover:text-studio-text disabled:opacity-20"
+                      title="Move down"
+                    >
+                      <ArrowDown size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        duplicateLayerByIndex(index);
+                      }}
+                      className="p-1 text-studio-text-dim hover:text-studio-text"
+                      title="Duplicate layer"
+                    >
+                      <Copy size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteLayerByIndex(index);
+                      }}
+                      className="p-1 text-studio-text-dim hover:text-red-400"
+                      title="Delete layer"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+        )}
       </div>
 
-      {/* Context Menu */}
-      {contextMenu.visible && contextMenu.layerId !== null && (
-        <div 
-          className="absolute bg-studio-bg border border-studio-border rounded shadow-lg z-50"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <div className="py-1">
-            <button
-              onClick={() => {
-                deleteLayer(contextMenu.layerId! as string);
-                setContextMenu({ visible: false, x: 0, y: 0, layerId: null as string | null });
-              }}
-              className="w-full text-left px-4 py-2 hover:bg-studio-panel-hover cursor-pointer text-xs text-red-400"
+      {/* Selected Layer Properties Inspector */}
+      {activeLayer && selectedLayerIndex !== null && (
+        <div className="border-t border-studio-border bg-studio-panel p-3 flex flex-col gap-2.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">
+            <Sliders size={12} />
+            <span>Layer Properties: {activeLayer.name}</span>
+          </div>
+
+          {/* Opacity slider */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-studio-text-dim uppercase">Opacity</span>
+              <span className="font-mono">{Math.round(activeLayer.opacity * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={Math.round(activeLayer.opacity * 100)}
+              onChange={(e) => setLayerOpacity(selectedLayerIndex, Number(e.target.value) / 100)}
+              className="w-full accent-studio-accent h-1.5 bg-black/40 rounded appearance-none cursor-pointer"
+            />
+          </div>
+
+          {/* Blend Mode dropdown */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-studio-text-dim uppercase">Blend Mode</span>
+            <select
+              value={activeLayer.blendMode}
+              onChange={(e) => setLayerBlendMode(selectedLayerIndex, e.target.value as GlobalCompositeOperation)}
+              className="w-full bg-black/40 border border-studio-border rounded px-2 py-1 text-xs text-studio-text focus:outline-none focus:border-studio-accent"
             >
-              Delete Layer
-            </button>
+              {BLEND_MODES.map((bm) => (
+                <option key={bm.value} value={bm.value}>
+                  {bm.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       )}

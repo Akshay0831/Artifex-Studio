@@ -1,9 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from config.config import settings
+from services.local_model_service import (
+    LOCAL_MODEL_CAPABILITIES,
+    LOCAL_MODEL_PROVIDERS,
+    LocalModelError,
+    local_model_service,
+)
 from utils.dependency_manager import get_current_user
 from utils.api_error_handler import (
     APIError, 
@@ -25,11 +31,13 @@ def check_profile_rate_limit(profile_id: str, profile_rate_limit: int = 60):
 # Pydantic models for request/response
 class ApiProfileBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    api_key: str = Field(..., min_length=1)
-    api_type: str = Field(..., pattern=r'^(replicate|runpod|openai)$')
+    api_key: str = ""
+    api_type: str = Field(..., pattern=r'^(replicate|runpod|openai|ollama|lm_studio)$')
+    base_url: Optional[str] = None
     is_active: bool = True
     models: List[str] = Field(default_factory=list)
-    default_model: str = None
+    default_model: Optional[str] = None
+    temperature: float = Field(default=0.3, ge=0, le=2)
     rate_limit: int = Field(default=60, ge=1, le=1000)
 
 class ApiProfileCreate(ApiProfileBase):
@@ -37,11 +45,18 @@ class ApiProfileCreate(ApiProfileBase):
 
 class ApiProfileUpdate(BaseModel):
     name: str = Field(None, min_length=1, max_length=100)
-    api_key: str = Field(None, min_length=1)
+    api_key: Optional[str] = None
+    api_type: Optional[str] = Field(None, pattern=r'^(replicate|runpod|openai|ollama|lm_studio)$')
+    base_url: Optional[str] = None
     is_active: bool = None
     models: List[str] = None
-    default_model: str = None
+    default_model: Optional[str] = None
+    temperature: Optional[float] = Field(None, ge=0, le=2)
     rate_limit: int = Field(None, ge=1, le=1000)
+
+
+class LocalModelDiscoveryRequest(BaseModel):
+    base_url: str = Field(..., min_length=1, max_length=2048)
 
 class ApiProfileResponse(ApiProfileBase):
     id: str
@@ -63,7 +78,7 @@ def validate_api_key(api_key: str, api_type: str) -> bool:
     import logging
     logger = logging.getLogger(__name__)
     
-    logger.info(f"Validating API key for type {api_type}: {api_key[:10]}...")
+    logger.info("Validating API key for type %s", api_type)
     
     if not api_key or len(api_key.strip()) < 1:
         raise handle_api_key_validation_error(api_type, "API key cannot be empty")
@@ -122,6 +137,22 @@ def validate_models(api_type: str, models: List[str]) -> None:
     """Validate that models are available for the specified API type"""
     if not models:
         raise handle_model_not_available_error("", api_type, "No models specified")
+
+    if api_type in LOCAL_MODEL_PROVIDERS:
+        invalid_models = [
+            model for model in models
+            if not isinstance(model, str)
+            or not model.strip()
+            or len(model) > 256
+            or any(ord(char) < 32 for char in model)
+        ]
+        if invalid_models:
+            raise handle_model_not_available_error(
+                ", ".join(str(model) for model in invalid_models),
+                api_type,
+                "Local model names must be non-empty and no longer than 256 characters.",
+            )
+        return
     
     available_models = get_models_for_provider(api_type)
     invalid_models = [model for model in models if model not in available_models]
@@ -167,15 +198,26 @@ async def create_profile(
     current_user = Depends(get_current_user)
 ):
     """Create a new API profile"""
-    # Validate API key
-    try:
+    if profile.api_type in LOCAL_MODEL_PROVIDERS:
+        try:
+            local_model_service.validate_base_url(profile.api_type, profile.base_url or "")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+    else:
+        if profile.base_url:
+            raise HTTPException(
+                status_code=400,
+                detail="A custom base URL is only supported for local model providers.",
+            )
         validate_api_key(profile.api_key, profile.api_type)
-    except Exception as e:
-        # The validate_api_key function now raises the appropriate error
-        raise e
     
     # Validate models
     validate_models(profile.api_type, profile.models)
+    if profile.default_model and profile.default_model not in profile.models:
+        raise HTTPException(
+            status_code=400,
+            detail="Default model must be selected from available models.",
+        )
     
     # Create profile
     profile_id = str(uuid.uuid4())
@@ -217,30 +259,35 @@ async def update_profile(
     # Update fields if provided
     update_data = updates.dict(exclude_unset=True)
     
-    if 'api_key' in update_data:
-        api_type = update_data.get('api_type', existing_profile['api_type'])
-        if not validate_api_key(update_data['api_key'], api_type):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid {api_type} API key format"
-            )
-    
-    if 'models' in update_data:
-        available_models = get_models_for_provider(existing_profile['api_type'])
-        invalid_models = [model for model in update_data['models'] if model not in available_models]
-        if invalid_models:
+    api_type = update_data.get('api_type', existing_profile['api_type'])
+    models = update_data.get('models', existing_profile['models'])
+    base_url = update_data.get('base_url', existing_profile.get('base_url'))
+    api_key = update_data.get('api_key', existing_profile['api_key'])
+    provider_changed = api_type != existing_profile['api_type']
+
+    if api_type in LOCAL_MODEL_PROVIDERS:
+        try:
+            local_model_service.validate_base_url(api_type, base_url or "")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+    else:
+        if base_url:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid models for {existing_profile['api_type']}: {', '.join(invalid_models)}"
+                detail="A custom base URL is only supported for local model providers.",
             )
-        
-        # If default model is being updated, validate it's in the models list
-        if 'default_model' in update_data and update_data['default_model']:
-            if update_data['default_model'] not in update_data['models']:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Default model must be selected from available models"
-                )
+        if 'api_key' in update_data or provider_changed:
+            validate_api_key(api_key, api_type)
+
+    if 'models' in update_data or provider_changed:
+        validate_models(api_type, models)
+
+    default_model = update_data.get('default_model', existing_profile['default_model'])
+    if default_model and default_model not in models:
+        raise HTTPException(
+            status_code=400,
+            detail="Default model must be selected from available models.",
+        )
     
     # Update the profile
     for key, value in update_data.items():
@@ -297,7 +344,7 @@ async def activate_profile(
 @router.get("/providers/{api_type}/models")
 async def get_models_for_provider_endpoint(api_type: str):
     """Get available models for a specific API provider"""
-    if api_type not in ['replicate', 'runpod', 'openai']:
+    if api_type not in {'replicate', 'runpod', 'openai'} | LOCAL_MODEL_PROVIDERS:
         raise HTTPException(status_code=400, detail="Invalid API provider")
     
     models = get_models_for_provider(api_type)
@@ -312,7 +359,31 @@ async def get_models_for_provider_endpoint(api_type: str):
         }
         models_with_metadata.append(model_info)
     
-    return {"api_type": api_type, "models": models_with_metadata}
+    return {
+        "api_type": api_type,
+        "models": models_with_metadata,
+        "capabilities": LOCAL_MODEL_CAPABILITIES if api_type in LOCAL_MODEL_PROVIDERS else None,
+    }
+
+
+@router.post("/providers/{api_type}/discover")
+async def discover_local_models(api_type: str, request: LocalModelDiscoveryRequest):
+    """Discover installed text models on a local Ollama or LM Studio runtime."""
+    if api_type not in LOCAL_MODEL_PROVIDERS:
+        raise HTTPException(status_code=400, detail="Model discovery is only available for local providers.")
+
+    try:
+        models = await local_model_service.discover_models(api_type, request.base_url)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except LocalModelError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return {
+        "api_type": api_type,
+        "capabilities": LOCAL_MODEL_CAPABILITIES,
+        "models": models,
+    }
 
 def _get_model_type(model_id: str, api_type: str) -> str:
     """Determine model type based on name patterns"""
@@ -384,6 +455,20 @@ async def get_providers():
                 "description": "Large language models",
                 "website": "https://openai.com",
                 "icon": "🤖"
+            },
+            {
+                "id": "ollama",
+                "name": "Ollama",
+                "description": "Local text models",
+                "icon": "🦙",
+                "capabilities": LOCAL_MODEL_CAPABILITIES,
+            },
+            {
+                "id": "lm_studio",
+                "name": "LM Studio",
+                "description": "Local text models",
+                "icon": "🖥️",
+                "capabilities": LOCAL_MODEL_CAPABILITIES,
             }
         ]
     }

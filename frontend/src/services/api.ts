@@ -1,15 +1,17 @@
 import axios from 'axios';
 import type {
   ArtGenerationRequest,
+  ExtractedReferencePalette,
+  GenerationRequest,
+  GenerationResponse,
   ImageGenerationResult,
+  LocalModelDiscoveryResponse,
   ProjectReference,
   ReferenceRole,
   StudioProject,
 } from '../types/api';
 
-const API_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:8000' 
-  : import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -23,6 +25,18 @@ const api = axios.create({
 const projectsClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+});
+
+const localModelClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+const textGenerationClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 180000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
 projectsClient.interceptors.response.use(
@@ -65,7 +79,7 @@ api.interceptors.response.use(
 
 // Health check
 export const healthApi = {
-  check: () => api.get('/health'),
+  check: () => api.get('/api/health'),
 };
 
 // Backup API
@@ -96,7 +110,7 @@ export const scalingApi = {
 
 // Config API
 export const configApi = {
-  getHealth: () => api.get('/api/config/health').catch(() => ({ status: 'ok' })),
+  getHealth: () => api.get('/api/config/health'),
   getEnvironments: () => api.get('/api/config/environments'),
   getCurrentEnvironment: () => api.get('/api/config/current'),
   setEnvironment: (env: string, config: any) => api.post('/api/config/set', { environment: env, config }),
@@ -107,7 +121,7 @@ export const configApi = {
 
 // Enhanced API
 export const enhancedApi = {
-  getHealth: () => api.get('/api/enhanced/health').catch(() => ({ status: 'ok' })),
+  getHealth: () => api.get('/api/enhanced/health'),
   createProject: (data: any) => api.post('/api/enhanced/projects', data),
   getProjects: () => api.get('/api/enhanced/projects'),
   getProject: (id: string) => api.get(`/api/enhanced/projects/${id}`),
@@ -121,8 +135,11 @@ export const enhancedApi = {
 
 // Art API
 export const artApi = {
-  getHealth: () => api.get('/api/art/health').catch(() => ({ status: 'ok' })),
+  getHealth: () => api.get('/api/art/health'),
   generateImage: (data: ArtGenerationRequest) =>
+    api.post<ImageGenerationResult>('/api/art/generate', data),
+  inpaintImage: (data: { base_image: string; mask_image: string; prompt: string; seed?: number; config?: any }) =>
+    api.post<ImageGenerationResult>('/api/art/inpaint', data),
     api.post<ImageGenerationResult>('/api/art/generate', data),
   getGenerationHistory: () => api.get('/api/art/history'),
   getGenerationStatus: (id: string) => api.get(`/api/art/status/${id}`),
@@ -130,6 +147,28 @@ export const artApi = {
   saveImage: (data: any) => api.post('/api/art/save', data),
   loadImage: (id: string) => api.get(`/api/art/load/${id}`),
   deleteImage: (id: string) => api.delete(`/api/art/delete/${id}`),
+};
+
+export const toolsApi = {
+  getManifest: () => api.get('/api/tools/manifest'),
+  callTool: (toolName: string, args: Record<string, any>) =>
+    api.post('/api/tools/call', { tool_name: toolName, arguments: args }),
+};
+
+export const localModelsApi = {
+  discover: async (provider: 'ollama' | 'lm_studio', baseUrl: string) =>
+    (await localModelClient.post<LocalModelDiscoveryResponse>(
+      `/api/api-management/providers/${provider}/discover`,
+      { base_url: baseUrl },
+    )).data,
+};
+
+export const textGenerationApi = {
+  generate: async (request: GenerationRequest) =>
+    (await textGenerationClient.post<GenerationResponse>(
+      '/api/generation/generate',
+      { ...request, generation_type: 'text' },
+    )).data,
 };
 
 // Project metadata and reference assets
@@ -145,6 +184,22 @@ export const projectsApi = {
     data: Omit<StudioProject, 'id' | 'created_at' | 'updated_at'>,
   ) =>
     (await projectsClient.put<StudioProject>(`/api/projects/${projectId}`, data)).data,
+  getEditorState: async (projectId: string) => {
+    const response = await projectsClient.get<ArrayBuffer>(
+      `/api/projects/${projectId}/editor-state`,
+      { responseType: 'arraybuffer' },
+    );
+    return response.status === 204 ? null : new Uint8Array(response.data);
+  },
+  saveEditorState: async (projectId: string, editorState: Uint8Array) =>
+    (await projectsClient.put<{ status: 'saved'; size_bytes: number }>(
+      `/api/projects/${projectId}/editor-state`,
+      editorState,
+      {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        timeout: 120000,
+      },
+    )).data,
   delete: async (projectId: string) =>
     (await projectsClient.delete(`/api/projects/${projectId}`)).data,
   exportBundle: async (projectId: string) =>
@@ -159,6 +214,15 @@ export const projectsApi = {
   listReferences: async (projectId: string) =>
     (await projectsClient.get<{ references: ProjectReference[]; total: number }>(
       `/api/projects/${projectId}/references`,
+    )).data,
+  extractReferencePalette: async (
+    projectId: string,
+    referenceId: string,
+    maxColors: number,
+  ) =>
+    (await projectsClient.get<ExtractedReferencePalette>(
+      `/api/projects/${projectId}/references/${referenceId}/palette`,
+      { params: { max_colors: maxColors } },
     )).data,
   uploadReference: async (
     projectId: string,
@@ -192,7 +256,7 @@ export const projectsApi = {
 
 // Audio API
 export const audioApi = {
-  getHealth: () => api.get('/api/audio/health').catch(() => ({ status: 'ok' })),
+  getHealth: () => api.get('/api/audio/health'),
   generateAudio: (data: any) => api.post('/api/audio/generate', data),
   getAudioHistory: () => api.get('/api/audio/history'),
   getAudioStatus: (id: string) => api.get(`/api/audio/status/${id}`),
@@ -200,6 +264,16 @@ export const audioApi = {
   saveAudio: (data: any) => api.post('/api/audio/save', data),
   loadAudio: (id: string) => api.get(`/api/audio/load/${id}`),
   deleteAudio: (id: string) => api.delete(`/api/audio/delete/${id}`),
+};
+
+// Tools API for external/in-app AI agents
+export const toolsApi = {
+  getManifest: () => api.get<{ protocol_version: string; tools: any[] }>('/api/tools/manifest'),
+  callTool: (toolName: string, args: Record<string, any>) => 
+    api.post<{ tool_name: string; status: string; result: any; error?: string }>('/api/tools/call', {
+      tool_name: toolName,
+      arguments: args
+    }),
 };
 
 export default api;

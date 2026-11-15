@@ -73,20 +73,30 @@ export const useAudioComposition = () => {
       });
     }
 
-    sendMessage({
-      type: 'regenerate_audio',
-      layer_index: layerIndex,
-      seed: seed,
-      config: { ...config, notes },
-      worktree: worktree // Pass target worktree context
-    });
+    try {
+      sendMessage({
+        type: 'regenerate_audio',
+        layer_index: layerIndex,
+        seed: seed,
+        config: { ...config, notes },
+        worktree
+      });
+    } catch (error) {
+      setIsComposing(false);
+      setComposingLayerIndex(null);
+      setCompositionError(
+        error instanceof Error ? error.message : 'Could not start audio composition.',
+      );
+    }
   }, [sendMessage, yAudio]);
 
   const cancel = useCallback(() => {
     setIsComposing(false);
     setComposingLayerIndex(null);
-    sendMessage({ type: 'cancel_operation' });
-  }, [sendMessage]);
+    setCompositionError(
+      'Composition cannot be cancelled yet; the server may continue processing.',
+    );
+  }, []);
 
   return {
     isComposing,

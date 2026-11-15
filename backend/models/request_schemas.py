@@ -4,12 +4,20 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class PaletteSourceReference(BaseModel):
+    project_id: str
+    reference_id: str
+    sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+    original_filename: str
+
+
 class ImagePaletteSettings(BaseModel):
     mode: Literal["off", "extract", "fixed", "maximum"] = "off"
     colors: List[str] = Field(default_factory=list, max_length=256)
     max_colors: Optional[int] = Field(None, ge=1, le=256)
     dither: bool = False
     preserve_alpha: bool = True
+    source_reference: Optional[PaletteSourceReference] = None
 
     @field_validator("colors")
     @classmethod
@@ -25,6 +33,8 @@ class ImagePaletteSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_options(self):
+        if self.source_reference is not None and self.mode != "fixed":
+            raise ValueError("A source reference requires fixed palette mode")
         if self.mode == "fixed":
             if not self.colors:
                 raise ValueError("Fixed palette mode requires at least one color")

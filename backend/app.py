@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from config.config import Settings
 settings = Settings()
 from routes import art, audio, backup, scaling, config, api_management_router, projects_router, exports_router, templates_router
+from routes.ai_tools import router as ai_tools_router
 from routes.generation import generation_router
 from api.image_processing import router as image_processing_router
 from inference_dispatcher import dispatcher
@@ -33,6 +34,7 @@ import os
 import asyncio
 import logging
 import sys
+import importlib.util
 
 APP_VERSION = os.getenv("ARTIFEX_VERSION", "0.1.0-alpha")
 
@@ -70,7 +72,14 @@ app.add_exception_handler(APIError, api_error_exception_handler)
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:3002", "http://127.0.0.1:8001", "http://127.0.0.1:8000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:3002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8001",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,6 +104,11 @@ async def broadcast_status_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    if not websocket_protocol_available():
+        logger.error(
+            "WebSocket transport is unavailable. Install backend requirements; "
+            "generation requires a WebSocket protocol implementation."
+        )
     asyncio.create_task(broadcast_status_loop())
 
 app.include_router(art.router, prefix="/api")
@@ -108,6 +122,7 @@ app.include_router(image_processing_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 app.include_router(exports_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
+app.include_router(ai_tools_router, prefix="/api")
 
 
 
@@ -126,6 +141,12 @@ FRONTEND_ASSETS = FRONTEND_DIST / "assets"
 
 start_time = time.time()
 
+def websocket_protocol_available() -> bool:
+    return any(
+        importlib.util.find_spec(module) is not None
+        for module in ("websockets", "wsproto")
+    )
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint with comprehensive system status."""
@@ -133,6 +154,7 @@ async def health_check():
 
     health_data = {
         "status": "ok",
+        "websocket_available": websocket_protocol_available(),
         "gpu_available": dispatcher.local_gpu_type is not None,
         "gpu_type": dispatcher.local_gpu_type,
         "vram": get_vram_info(),

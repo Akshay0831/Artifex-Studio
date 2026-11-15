@@ -1,517 +1,189 @@
-import React, { useState } from 'react'
-import { 
-  MousePointer2, Brush, Square, RotateCcw, Star, Circle, Triangle, Pentagon, Heart, X,
-  ArrowRight, Type, AlignLeft, AlignCenter, Bold,
-  Italic, Underline, Strikethrough, Palette, Droplet, Image, Upload, Copy, Trash2,
-  Eye, EyeOff, Layers, Hash, Sliders, Zap, Move,
-  Plus, FlipHorizontal, FlipVertical, Sun, Hexagon
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react'
+import { Brush, Eraser, MousePointer2, Search, Square, Type, Crop, BoxSelect } from 'lucide-react'
+import { ToolType } from '../../features/art/types'
+import type { ToolShortcutMap } from '../../hooks/useToolShortcuts'
+import ToolLookup, { type Tool } from './ToolLookup'
 
-interface Tool {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ComponentType<any>;
-  keywords: string[];
-  popular?: boolean;
-  subTools?: Array<{
-    id: string;
-    name: string;
-    icon: React.ComponentType<any>;
-  }>;
-}
-
-import ToolLookup from './ToolLookup';
-import { MaterialButton } from '../common/MaterialButton';
-
-// Art tool definitions
 const artTools: Tool[] = [
   {
-    id: 'selection',
-    name: 'Selection Tool',
-    description: 'Select and move objects on canvas',
+    id: ToolType.SELECT,
+    name: 'Select',
+    description: 'Select, move, and transform objects on the canvas.',
     category: 'Selection',
     icon: MousePointer2,
-    keywords: ['select', 'move', 'transform', 'resize', 'rotate'],
-    popular: true
+    keywords: ['select', 'move', 'transform', 'pointer'],
   },
   {
-    id: 'brush',
-    name: 'Brush Tool',
-    description: 'Draw freehand paths with customizable settings',
+    id: ToolType.SELECTION,
+    name: 'Marquee',
+    description: 'Draw rectangular marquee selection for cropping or AI masking.',
+    category: 'Selection',
+    icon: BoxSelect,
+    keywords: ['marquee', 'box', 'select', 'bounding', 'area'],
+  },
+  {
+    id: ToolType.BRUSH,
+    name: 'Brush',
+    description: 'Draw freehand paths with the configured brush.',
     category: 'Drawing',
     icon: Brush,
-    keywords: ['draw', 'paint', 'freehand', 'stroke', 'sketch'],
-    popular: true
+    keywords: ['draw', 'paint', 'freehand'],
   },
   {
-    id: 'pen',
-    name: 'Pen Tool',
-    description: 'Create precise paths with control points',
-    category: 'Drawing',
-    icon: Brush,
-    keywords: ['vector', 'path', 'bezier', 'curve', 'precise']
-  },
-  {
-    id: 'eraser',
-    name: 'Eraser Tool',
-    description: 'Remove parts of your drawing',
+    id: ToolType.ERASER,
+    name: 'Eraser',
+    description: 'Erase using the configured eraser size.',
     category: 'Editing',
-    icon: Brush,
-    keywords: ['erase', 'remove', 'delete', 'clean'],
-    popular: true
+    icon: Eraser,
+    keywords: ['erase', 'remove'],
   },
   {
-    id: 'text',
-    name: 'Text Tool',
-    description: 'Add text to your canvas',
-    category: 'Typography',
-    icon: Type,
-    keywords: ['text', 'font', 'typography', 'label'],
-    popular: true,
-    subTools: [
-      { id: 'text-style', name: 'Text Style', icon: AlignLeft },
-      { id: 'text-bold', name: 'Bold', icon: Bold },
-      { id: 'text-italic', name: 'Italic', icon: Italic },
-      { id: 'text-underline', name: 'Underline', icon: Underline },
-      { id: 'text-strikethrough', name: 'Strikethrough', icon: Strikethrough }
-    ]
-  },
-  {
-    id: 'shapes',
-    name: 'Shape Tools',
-    description: 'Create geometric shapes',
+    id: ToolType.SHAPE,
+    name: 'Shape',
+    description: 'Draw geometric shapes (rectangle, circle, triangle).',
     category: 'Shapes',
     icon: Square,
-    keywords: ['shape', 'geometry', 'form'],
-    subTools: [
-      { id: 'rectangle', name: 'Rectangle', icon: Square },
-      { id: 'circle', name: 'Circle', icon: Circle },
-      { id: 'triangle', name: 'Triangle', icon: Triangle },
-      { id: 'pentagon', name: 'Pentagon', icon: Pentagon },
-      { id: 'hexagon', name: 'Hexagon', icon: Hexagon },
-      { id: 'star', name: 'Star', icon: Star },
-      { id: 'heart', name: 'Heart', icon: Heart },
-      { id: 'ellipse', name: 'Ellipse', icon: Circle },
-      { id: 'line', name: 'Line', icon: ArrowRight }
-    ]
+    keywords: ['shape', 'rectangle', 'circle', 'triangle', 'geometry'],
   },
   {
-    id: 'lines',
-    name: 'Line Tools',
-    description: 'Create straight and curved lines',
-    category: 'Drawing',
-    icon: ArrowRight,
-    keywords: ['line', 'straight', 'curved', 'arrow'],
-    subTools: [
-      { id: 'straight-line', name: 'Straight Line', icon: ArrowRight },
-      { id: 'arrow', name: 'Arrow', icon: ArrowRight },
-      { id: 'curved-line', name: 'Curved Line', icon: Brush },
-      { id: 'bezier-curve', name: 'Bezier Curve', icon: Brush },
-      { id: 'spline', name: 'Spline', icon: Brush }
-    ]
-  },
-  {
-    id: 'image',
-    name: 'Image Tools',
-    description: 'Add and manipulate images',
-    category: 'Media',
-    icon: Image,
-    keywords: ['image', 'photo', 'picture', 'import'],
-    popular: true,
-    subTools: [
-      { id: 'place-image', name: 'Place Image', icon: Upload },
-      { id: 'crop', name: 'Crop', icon: Square },
-      { id: 'resize', name: 'Resize', icon: Square },
-      { id: 'rotate-image', name: 'Rotate Image', icon: RotateCcw },
-      { id: 'flip-image', name: 'Flip Image', icon: FlipHorizontal },
-      { id: 'filter-image', name: 'Filters', icon: Sliders }
-    ]
-  },
-  {
-    id: 'transform',
-    name: 'Transform Tools',
-    description: 'Move, rotate, and scale objects',
-    category: 'Transform',
-    icon: Move,
-    keywords: ['transform', 'move', 'rotate', 'scale', 'flip'],
-    popular: true,
-    subTools: [
-      { id: 'move', name: 'Move', icon: Move },
-      { id: 'rotate', name: 'Rotate', icon: RotateCcw },
-      { id: 'scale', name: 'Scale', icon: Square },
-      { id: 'flip-horizontal', name: 'Flip Horizontal', icon: FlipHorizontal },
-      { id: 'flip-vertical', name: 'Flip Vertical', icon: FlipVertical },
-      { id: 'skew', name: 'Skew', icon: Square }
-    ]
-  },
-  {
-    id: 'effects',
-    name: 'Effect Tools',
-    description: 'Apply visual effects to your artwork',
-    category: 'Effects',
-    icon: Zap,
-    keywords: ['effect', 'filter', 'style', 'visual'],
-    subTools: [
-      { id: 'blur', name: 'Blur', icon: Sliders },
-      { id: 'sharpen', name: 'Sharpen', icon: Sliders },
-      { id: 'color-balance', name: 'Color Balance', icon: Palette },
-      { id: 'brightness-contrast', name: 'Brightness & Contrast', icon: Sun },
-      { id: 'hue-saturation', name: 'Hue/Saturation', icon: Sliders },
-      { id: 'vintage', name: 'Vintage', icon: Palette },
-      { id: 'grayscale', name: 'Grayscale', icon: EyeOff },
-      { id: 'sepia', name: 'Sepia', icon: Palette }
-    ]
-  },
-  {
-    id: 'layers',
-    name: 'Layer Management',
-    description: 'Organize your artwork with layers',
-    category: 'Organization',
-    icon: Layers,
-    keywords: ['layers', 'organize', 'stack', 'arrange'],
-    popular: true,
-    subTools: [
-      { id: 'new-layer', name: 'New Layer', icon: Plus },
-      { id: 'delete-layer', name: 'Delete Layer', icon: Trash2 },
-      { id: 'duplicate-layer', name: 'Duplicate Layer', icon: Copy },
-      { id: 'merge-layers', name: 'Merge Layers', icon: RotateCcw },
-      { id: 'flatten-layers', name: 'Flatten Layers', icon: Layers },
-      { id: 'layer-visibility', name: 'Visibility', icon: Eye }
-    ]
-  },
-  {
-    id: 'color',
-    name: 'Color Tools',
-    description: 'Manage colors and palettes',
-    category: 'Color',
-    icon: Palette,
-    keywords: ['color', 'palette', 'hue', 'saturation'],
-    popular: true,
-    subTools: [
-      { id: 'eyedropper', name: 'Eyedropper', icon: Droplet },
-      { id: 'fill', name: 'Fill', icon: Square },
-      { id: 'gradient', name: 'Gradient', icon: Square },
-      { id: 'color-picker', name: 'Color Picker', icon: Palette },
-      { id: 'color-palette', name: 'Color Palette', icon: Palette },
-      { id: 'color-history', name: 'Color History', icon: Palette }
-    ]
-  },
-  {
-    id: 'text-edit',
-    name: 'Text Editing',
-    description: 'Edit text properties',
+    id: ToolType.TEXT,
+    name: 'Text',
+    description: 'Add vector typography and editable text.',
     category: 'Typography',
     icon: Type,
-    keywords: ['text', 'font', 'style', 'typography'],
-    subTools: [
-      { id: 'font-size', name: 'Font Size', icon: Hash },
-      { id: 'font-family', name: 'Font Family', icon: Type },
-      { id: 'text-color', name: 'Text Color', icon: Palette },
-      { id: 'text-align', name: 'Text Alignment', icon: AlignCenter },
-      { id: 'text-spacing', name: 'Letter Spacing', icon: AlignCenter },
-      { id: 'line-spacing', name: 'Line Spacing', icon: AlignCenter }
-    ]
+    keywords: ['text', 'type', 'typography', 'font'],
   },
   {
-    id: 'drawing',
-    name: 'Advanced Drawing',
-    description: 'Professional drawing tools',
-    category: 'Drawing',
-    icon: Brush,
-    keywords: ['advanced', 'professional', 'expert', 'technical'],
-    subTools: [
-      { id: 'pencil', name: 'Pencil', icon: Brush },
-      { id: 'airbrush', name: 'Airbrush', icon: Brush },
-      { id: 'marker', name: 'Marker', icon: Brush },
-      { id: 'calligraphy', name: 'Calligraphy', icon: Brush },
-      { id: 'ink', name: 'Ink Pen', icon: Brush },
-      { id: 'charcoal', name: 'Charcoal', icon: Brush }
-    ]
+    id: ToolType.CROP,
+    name: 'Crop',
+    description: 'Resize canvas dimensions or crop visible region.',
+    category: 'Canvas',
+    icon: Crop,
+    keywords: ['crop', 'resize', 'dimensions', 'canvas'],
   },
-  {
-    id: 'selection-modes',
-    name: 'Selection Modes',
-    description: 'Different selection techniques',
-    category: 'Selection',
-    icon: MousePointer2,
-    keywords: ['selection', 'mask', 'alpha', 'channel'],
-    subTools: [
-      { id: 'rectangular-selection', name: 'Rectangular', icon: Square },
-      { id: 'circular-selection', name: 'Circular', icon: Circle },
-      { id: 'lasso', name: 'Lasso', icon: ArrowRight },
-      { id: 'magic-wand', name: 'Magic Wand', icon: Square },
-      { id: 'color-range', name: 'Color Range', icon: Palette }
-    ]
-  },
-  {
-    id: 'adjustments',
-    name: 'Image Adjustments',
-    description: 'Advanced image editing',
-    category: 'Effects',
-    icon: Sliders,
-    keywords: ['adjustment', 'enhancement', 'correction', 'fix'],
-    subTools: [
-      { id: 'levels', name: 'Levels', icon: Sliders },
-      { id: 'curves', name: 'Curves', icon: Sliders },
-      { id: 'exposure', name: 'Exposure', icon: Sun },
-      { id: 'shadows-highlights', name: 'Shadows/Highlights', icon: Sliders },
-      { id: 'vibrance', name: 'Vibrance', icon: Palette },
-      { id: 'saturation', name: 'Saturation', icon: Palette },
-      { id: 'temperature', name: 'Temperature', icon: Sun },
-      { id: 'tint', name: 'Tint', icon: Palette }
-    ]
-  },
-  {
-    id: 'selection-editing',
-    name: 'Selection Editing',
-    description: 'Modify selections',
-    category: 'Selection',
-    icon: MousePointer2,
-    keywords: ['selection', 'modify', 'expand', 'contract', 'feather'],
-    subTools: [
-      { id: 'expand-selection', name: 'Expand', icon: Square },
-      { id: 'contract-selection', name: 'Contract', icon: Square },
-      { id: 'feather', name: 'Feather', icon: Square },
-      { id: 'refine', name: 'Refine Edge', icon: MousePointer2 },
-      { id: 'invert', name: 'Invert', icon: Square },
-      { id: 'deselect', name: 'Deselect', icon: X }
-    ]
-  },
-  {
-    id: 'path-editing',
-    name: 'Path Editing',
-    description: 'Modify vector paths',
-    category: 'Drawing',
-    icon: Brush,
-    keywords: ['path', 'vector', 'edit', 'modify'],
-    subTools: [
-      { id: 'add-anchor', name: 'Add Anchor Point', icon: Plus },
-      { id: 'delete-anchor', name: 'Delete Anchor Point', icon: Trash2 },
-      { id: 'convert-anchor', name: 'Convert Anchor', icon: MousePointer2 },
-      { id: 'path-direct', name: 'Direct Select', icon: MousePointer2 },
-      { id: 'path-edit', name: 'Path Edit', icon: Brush },
-      { id: 'stroke-path', name: 'Stroke Path', icon: Brush },
-      { id: 'fill-path', name: 'Fill Path', icon: Square }
-    ]
-  }
-];
+]
 
 interface ArtToolLookupProps {
-  activeTool?: string;
-  onToolSelect: (toolId: string) => void;
-  showCompact?: boolean;
+  activeTool: string
+  onToolSelect: (toolId: string) => void
+  toolShortcuts: ToolShortcutMap
+  onShortcutChange: (toolId: string, value: string) => void
 }
 
 const ArtToolLookup: React.FC<ArtToolLookupProps> = ({
-  activeTool = '',
-  onToolSelect = () => {},
-  showCompact = false
+  activeTool,
+  onToolSelect,
+  toolShortcuts,
+  onShortcutChange,
 }) => {
-  const [expandedTool, setExpandedTool] = useState<string | null>(null);
-  const [selectedTool, setSelectedTool] = useState<string>(activeTool || '');
+  const [recentToolIds, setRecentToolIds] = useState<string[]>([])
+  const previousActiveTool = useRef(activeTool)
 
-  const handleToolSelect = (toolId: string) => {
-    setSelectedTool(toolId);
-    onToolSelect(toolId);
-    setExpandedTool(null);
-  };
+  useEffect(() => {
+    if (previousActiveTool.current === activeTool) return
+    previousActiveTool.current = activeTool
+    if (!artTools.some(tool => tool.id === activeTool)) return
+    setRecentToolIds(current => [activeTool, ...current.filter(id => id !== activeTool)].slice(0, 4))
+  }, [activeTool])
+
+  const selectTool = (toolId: string) => {
+    if (!artTools.some(tool => tool.id === toolId)) return
+    onToolSelect(toolId)
+    setRecentToolIds(current => [toolId, ...current.filter(id => id !== toolId)].slice(0, 4))
+  }
 
   return (
-    <div className="space-y-2">
-      <ToolLookup
-        tools={artTools}
-        selectedTool={selectedTool}
-        onToolSelect={handleToolSelect}
-        placeholder="Select a tool..."
-        showPopular={false}
-        showCategories={false}
-        compact={showCompact}
-      />
+    <div className="space-y-3">
+      <div role="toolbar" aria-label="Art tools" className="grid grid-cols-7 gap-1">
+        {artTools.map(tool => {
+          const Icon = tool.icon
+          const shortcut = toolShortcuts[tool.id]
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              onClick={() => selectTool(tool.id)}
+              aria-label={`${tool.name}${shortcut ? `, shortcut ${shortcut.toUpperCase()}` : ''}`}
+              aria-pressed={activeTool === tool.id}
+              title={`${tool.name}${shortcut ? ` (${shortcut.toUpperCase()})` : ''}`}
+              className={`flex min-w-0 items-center justify-center rounded border p-2 transition-colors ${
+                activeTool === tool.id
+                  ? 'border-studio-accent bg-studio-panel-selected text-studio-text'
+                  : 'border-studio-border text-studio-text-dim hover:bg-studio-hover hover:text-studio-text'
+              }`}
+            >
+              <Icon size={16} aria-hidden="true" />
+              <span className="sr-only">{tool.name}</span>
+            </button>
+          )
+        })}
+      </div>
 
-      {/* Quick Access Toolbar */}
-      {!showCompact && (
-        <div className="mt-4 p-3 bg-studio-panel border border-studio-border rounded-lg">
-          <div className="text-xs font-bold text-studio-text-dim mb-2 uppercase tracking-wider">Quick Access</div>
-          <div className="flex flex-wrap gap-1">
-            {artTools.filter(tool => tool.popular).map(tool => (
-              <MaterialButton
-                key={tool.id}
-                variant={selectedTool === tool.id ? "outline" : "ghost"}
-                size="sm"
-                onClick={() => handleToolSelect(tool.id)}
-                className="text-xs"
-              >
-                <tool.icon size={14} />
-                <span className="ml-1">{tool.name}</span>
-              </MaterialButton>
-            ))}
-          </div>
-          
-          {/* Quick Categories */}
-          <div className="mt-3 pt-3 border-t border-studio-border">
-            <div className="text-xs font-bold text-studio-text-dim mb-2 uppercase tracking-wider">Categories</div>
-            <div className="flex flex-wrap gap-1">
-              {Array.from(new Set(artTools.map(tool => tool.category))).slice(0, 6).map(category => (
-                <MaterialButton
-                  key={category}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const categoryTools = artTools.filter(t => t.category === category);
-                    const firstTool = categoryTools[0];
-                    handleToolSelect(firstTool.id);
-                  }}
-                  className="text-xs text-studio-text-dim"
-                >
-                  {category}
-                </MaterialButton>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Subtools */}
-      {!showCompact && expandedTool && (
-        <div className="mt-2 p-3 bg-studio-panel border border-studio-border rounded-lg">
-          <div className="text-xs font-bold text-studio-accent mb-2 uppercase tracking-wider">
-            {(() => {
-              const parentTool = artTools.find(t => t.id === expandedTool);
-              return parentTool ? parentTool.name + ' Tools' : 'Sub-Tools';
-            })()}
-          </div>
-          
-          {/* Description */}
-          <div className="text-xs text-studio-text-dim mb-3">
-            {(() => {
-              const parentTool = artTools.find(t => t.id === expandedTool);
-              return parentTool ? parentTool.description : '';
-            })()}
-          </div>
-          
-          <div className="grid grid-cols-2 gap-1">
-            {(() => {
-              const parentTool = artTools.find(t => t.id === expandedTool);
-              if (!parentTool?.subTools) return null;
-              
-              return parentTool.subTools.map(subTool => (
-                <MaterialButton
-                  key={subTool.id}
-                  variant={selectedTool === subTool.id ? "outline" : "ghost"}
-                  size="sm"
-                  onClick={() => handleToolSelect(subTool.id)}
-                  className="text-xs h-8"
-                >
-                  <subTool.icon size={14} />
-                  <span className="ml-1 truncate">{subTool.name}</span>
-                </MaterialButton>
-              ));
-            })()}
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="mt-3 pt-3 border-t border-studio-border">
-            <div className="text-xs font-bold text-studio-text-dim mb-2 uppercase tracking-wider">Actions</div>
-            <div className="flex gap-1">
-              <MaterialButton
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpandedTool(null)}
-                className="text-xs"
-              >
-                <X size={12} />
-                <span className="ml-1">Close</span>
-              </MaterialButton>
-              <MaterialButton
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const parentTool = artTools.find(t => t.id === expandedTool);
-                  if (parentTool?.popular) {
-                    handleToolSelect(parentTool.id);
-                    setExpandedTool(null);
-                  }
-                }}
-                className="text-xs"
-              >
-                <RotateCcw size={12} />
-                <span className="ml-1">Main Tool</span>
-              </MaterialButton>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tool Info Panel */}
-      {!showCompact && selectedTool && (
-        <div className="mt-2 p-3 bg-studio-panel border border-studio-border rounded-lg">
-          <div className="text-xs font-bold text-studio-accent mb-2 uppercase tracking-wider">
-            {(() => {
-              const tool = artTools.find(t => t.id === selectedTool);
-              return tool ? tool.name : 'Selected Tool';
-            })()}
-          </div>
-          
-          <div className="text-xs text-studio-text-dim mb-3">
-            {(() => {
-              const tool = artTools.find(t => t.id === selectedTool);
-              return tool ? tool.description : '';
-            })()}
-          </div>
-          
-          {(() => {
-            const tool = artTools.find(t => t.id === selectedTool);
-            if (!tool?.subTools || tool.subTools.length === 0) return null;
-            
+      {recentToolIds.length > 0 && (
+        <div className="flex items-center gap-1" role="toolbar" aria-label="Recent tools">
+          <span className="mr-1 text-[10px] text-studio-text-dim">Recent</span>
+          {recentToolIds.map(toolId => {
+            const tool = artTools.find(item => item.id === toolId)
+            if (!tool) return null
+            const Icon = tool.icon
             return (
-              <div>
-                <div className="text-xs font-bold text-studio-text-dim mb-2 uppercase tracking-wider">
-                  Related Tools
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {tool.subTools.map(subTool => (
-                    <MaterialButton
-                      key={subTool.id}
-                      variant={selectedTool === subTool.id ? "outline" : "ghost"}
-                      size="sm"
-                      onClick={() => handleToolSelect(subTool.id)}
-                      className="text-xs"
-                    >
-                      <subTool.icon size={12} />
-                      <span className="ml-1">{subTool.name}</span>
-                    </MaterialButton>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* Recent Tools */}
-      {!showCompact && selectedTool && (
-        <div className="mt-2 p-3 bg-studio-panel border border-studio-border rounded-lg">
-          <div className="text-xs font-bold text-studio-text-dim mb-2 uppercase tracking-wider">Recent Tools</div>
-          <div className="flex gap-1">
-            {artTools.slice(0, 4).map(tool => (
-              <MaterialButton
+              <button
                 key={tool.id}
-                variant="ghost"
-                size="sm"
-                onClick={() => handleToolSelect(tool.id)}
-                className="text-xs"
+                type="button"
+                onClick={() => selectTool(tool.id)}
+                aria-label={`Recent tool: ${tool.name}`}
+                title={`${tool.name}${toolShortcuts[tool.id] ? ` (${toolShortcuts[tool.id].toUpperCase()})` : ''}`}
+                className="rounded p-1.5 text-studio-text-dim hover:bg-studio-hover hover:text-studio-text"
               >
-                <tool.icon size={12} />
-                <span className="ml-1">{tool.name}</span>
-              </MaterialButton>
-            ))}
-          </div>
+                <Icon size={14} aria-hidden="true" />
+              </button>
+            )
+          })}
         </div>
       )}
-    </div>
-  );
-};
 
-export default ArtToolLookup;
+      <details className="rounded border border-studio-border">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1.5 text-xs text-studio-text-dim hover:bg-studio-hover">
+          <Search size={14} aria-hidden="true" />
+          <span>Browse tools</span>
+        </summary>
+        <div className="border-t border-studio-border p-2">
+          <ToolLookup
+            tools={artTools}
+            selectedTool={activeTool}
+            onToolSelect={selectTool}
+            placeholder="Search art tools..."
+            showPopular={false}
+            showCategories
+          />
+        </div>
+      </details>
+
+      <details className="rounded border border-studio-border">
+        <summary className="cursor-pointer list-none px-2 py-1.5 text-xs text-studio-text-dim hover:bg-studio-hover">
+          Tool shortcuts
+        </summary>
+        <div className="space-y-2 border-t border-studio-border p-2">
+          {artTools.map(tool => (
+            <label key={tool.id} className="flex min-w-0 items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 flex-1">{tool.name}</span>
+              <input
+                aria-label={`${tool.name} shortcut`}
+                title={`Set the keyboard shortcut for ${tool.name}`}
+                value={(toolShortcuts[tool.id] || '').toUpperCase()}
+                onChange={event => onShortcutChange(tool.id, event.target.value)}
+                maxLength={1}
+                className="h-7 w-9 rounded border border-studio-border bg-studio-input-bg text-center text-studio-text"
+              />
+            </label>
+          ))}
+          <p className="text-[10px] text-studio-text-dim">
+            Single letters and numbers activate tools when you are not typing in a field.
+          </p>
+        </div>
+      </details>
+    </div>
+  )
+}
+
+export default ArtToolLookup

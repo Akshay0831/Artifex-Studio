@@ -3,11 +3,12 @@ import { ApiProfile } from '../../types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/themed'
 import { Button } from '@/components/ui/themed'
 import { Input } from '@/components/ui/themed'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/themed'
+import { Select } from '@/components/ui/themed'
 import { Checkbox } from '@/components/ui/themed'
 import { Badge } from '@/components/ui/themed'
 import { Label } from '@/components/ui/themed'
-import { Key } from 'lucide-react'
+import { Key, Loader2, RefreshCw } from 'lucide-react'
+import { localModelsApi } from '../../services/api'
 
 interface ApiProfileEditorProps {
   profile?: ApiProfile | null
@@ -18,8 +19,17 @@ interface ApiProfileEditorProps {
 const API_PROVIDERS = [
   { value: 'replicate', label: 'Replicate', description: 'AI model hosting platform' },
   { value: 'runpod', label: 'RunPod', description: 'GPU computing platform' },
-  { value: 'openai', label: 'OpenAI', description: 'Large language models' }
-]
+  { value: 'openai', label: 'OpenAI', description: 'Large language models' },
+  { value: 'ollama', label: 'Ollama', description: 'Local text models' },
+  { value: 'lm_studio', label: 'LM Studio', description: 'Local text models' },
+] as const
+
+type ProviderType = ApiProfile['api_type']
+const isLocalProvider = (provider: ProviderType) =>
+  provider === 'ollama' || provider === 'lm_studio'
+
+const defaultBaseUrl = (provider: ProviderType) =>
+  provider === 'ollama' ? 'http://127.0.0.1:11434' : 'http://127.0.0.1:1234/v1'
 
 interface ModelOption {
   value: string
@@ -56,10 +66,12 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
   const [formData, setFormData] = useState({
     name: '',
     api_key: '',
-    api_type: API_PROVIDERS[0].value,
+    api_type: API_PROVIDERS[0].value as ProviderType,
+    base_url: '',
     is_active: false,
     models: [] as string[],
     default_model: '',
+    temperature: 0.3,
     rate_limit: 60,
     usage_count: 0,
     last_used: null as string | null,
@@ -67,6 +79,10 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
   })
 
   const [selectedModels, setSelectedModels] = useState<string[]>([])
+  const [discoveredModels, setDiscoveredModels] = useState<ModelOption[]>([])
+  const [isDiscovering, setIsDiscovering] = useState(false)
+  const [discoveryMessage, setDiscoveryMessage] = useState('')
+  const [discoveryError, setDiscoveryError] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -75,34 +91,53 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
         name: profile.name,
         api_key: profile.api_key,
         api_type: profile.api_type,
+        base_url: profile.base_url || defaultBaseUrl(profile.api_type),
         is_active: profile.is_active,
         models: profile.models,
         default_model: profile.default_model || '',
+        temperature: profile.temperature ?? 0.3,
         rate_limit: profile.rate_limit,
         usage_count: profile.usage_count,
         last_used: profile.last_used,
         created_at: profile.created_at
       })
       setSelectedModels(profile.models)
+      setDiscoveredModels(
+        isLocalProvider(profile.api_type)
+          ? profile.models.map(model => ({ value: model, label: model, type: 'text' }))
+          : [],
+      )
     }
   }, [profile])
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
+    const localProvider = isLocalProvider(formData.api_type)
     
     if (!formData.name.trim()) {
       newErrors.name = 'Profile name is required'
     }
     
-    if (!formData.api_key.trim()) {
+    if (!localProvider && !formData.api_key.trim()) {
       newErrors.api_key = 'API key is required'
+    }
+
+    if (localProvider && !formData.base_url.trim()) {
+      newErrors.base_url = 'Local runtime URL is required'
+    }
+
+    if (
+      localProvider &&
+      (!Number.isFinite(formData.temperature) || formData.temperature < 0 || formData.temperature > 2)
+    ) {
+      newErrors.temperature = 'Temperature must be between 0 and 2'
     }
     
     if (selectedModels.length === 0) {
       newErrors.models = 'At least one model must be selected'
     }
     
-    if (selectedModels.includes(formData.default_model) && !formData.default_model) {
+    if (formData.default_model && !selectedModels.includes(formData.default_model)) {
       newErrors.default_model = 'Default model must be selected from available models'
     }
     
@@ -119,11 +154,13 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
 
     const profileData: Omit<ApiProfile, 'id'> = {
       name: formData.name,
-      api_key: formData.api_key,
-      api_type: formData.api_type as 'replicate' | 'runpod' | 'openai',
+      api_key: isLocalProvider(formData.api_type) ? '' : formData.api_key,
+      api_type: formData.api_type,
+      base_url: isLocalProvider(formData.api_type) ? formData.base_url.trim() : null,
       is_active: formData.is_active,
       models: selectedModels,
       default_model: formData.default_model || null,
+      temperature: formData.temperature,
       rate_limit: formData.rate_limit,
       usage_count: formData.usage_count,
       last_used: formData.last_used,
@@ -155,7 +192,52 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
     }
   }
 
-  const availableModels = API_MODELS[formData.api_type] || []
+  const handleDiscoverModels = async () => {
+    if (!isLocalProvider(formData.api_type)) return
+    setIsDiscovering(true)
+    setDiscoveryMessage('')
+    setDiscoveryError('')
+    try {
+      const response = await localModelsApi.discover(formData.api_type, formData.base_url.trim())
+      const models = response.models.map(model => ({
+        value: model.id,
+        label: model.name,
+        type: model.type,
+      }))
+      setDiscoveredModels(models)
+      setSelectedModels(current => current.filter(model => models.some(item => item.value === model)))
+      setFormData(current => ({
+        ...current,
+        default_model: models.some(model => model.value === current.default_model)
+          ? current.default_model
+          : '',
+      }))
+      setDiscoveryMessage(
+        models.length
+          ? `Found ${models.length} local text model${models.length === 1 ? '' : 's'}.`
+          : 'Connected, but no models were found. Load a model in the local runtime and try again.',
+      )
+    } catch (error) {
+      const response = typeof error === 'object' && error !== null && 'response' in error
+        ? (error as { response?: { data?: { detail?: unknown } } }).response
+        : undefined
+      const detail = response?.data?.detail
+      setDiscoveryError(
+        typeof detail === 'string'
+          ? detail
+          : 'Could not connect to the local runtime. Check the URL and confirm the server is running.',
+      )
+      setDiscoveredModels([])
+      setSelectedModels([])
+      setFormData(current => ({ ...current, default_model: '' }))
+    } finally {
+      setIsDiscovering(false)
+    }
+  }
+
+  const availableModels = isLocalProvider(formData.api_type)
+    ? discoveredModels
+    : API_MODELS[formData.api_type] || []
 
   return (
     <Card>
@@ -178,39 +260,100 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, name: e.target.value }))}
               placeholder="e.g., My Replicate Account"
             />
-            {errors.name && <p className="text-sm text-red-600">{errors.name}</p>}
+            {errors.name && <p className="text-sm text-studio-error">{errors.name}</p>}
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="api_type">API Provider</Label>
-            <Select value={formData.api_type} onValueChange={(value: string) => setFormData(prev => ({ ...prev, api_type: value }))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select API provider" />
-              </SelectTrigger>
-              <SelectContent>
+            <Select
+              value={formData.api_type}
+              onValueChange={(value: string) => {
+                const provider = value as ProviderType
+                setFormData(prev => ({
+                  ...prev,
+                  api_type: provider,
+                  api_key: isLocalProvider(provider) ? '' : prev.api_key,
+                  base_url: isLocalProvider(provider) ? defaultBaseUrl(provider) : '',
+                  default_model: '',
+                }))
+                setSelectedModels([])
+                setDiscoveredModels([])
+                setDiscoveryMessage('')
+                setDiscoveryError('')
+              }}
+            >
                 {API_PROVIDERS.map(provider => (
-                  <SelectItem key={provider.value} value={provider.value}>
-                    <div>
-                      <div className="font-medium">{provider.label}</div>
-                      <div className="text-sm text-gray-600">{provider.description}</div>
-                    </div>
-                  </SelectItem>
+                  <option key={provider.value} value={provider.value}>
+                    {provider.label} - {provider.description}
+                  </option>
                 ))}
-              </SelectContent>
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="api_key">API Key</Label>
-            <Input
-              id="api_key"
-              type="password"
-              value={formData.api_key}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, api_key: e.target.value }))}
-              placeholder="Enter your API key"
-            />
-            {errors.api_key && <p className="text-sm text-red-600">{errors.api_key}</p>}
-          </div>
+          {isLocalProvider(formData.api_type) ? (
+            <div className="space-y-2">
+              <Label htmlFor="base_url">Local runtime URL</Label>
+              <Input
+                id="base_url"
+                type="url"
+                value={formData.base_url}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  setFormData(prev => ({ ...prev, base_url: e.target.value, default_model: '' }))
+                  setSelectedModels([])
+                  setDiscoveredModels([])
+                  setDiscoveryMessage('')
+                  setDiscoveryError('')
+                }}
+                placeholder={defaultBaseUrl(formData.api_type)}
+              />
+              {errors.base_url && <p className="text-sm text-studio-error">{errors.base_url}</p>}
+              <p className="text-xs text-studio-text-dim">
+                Only localhost or loopback addresses are accepted. Local profiles support text inference only.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleDiscoverModels}
+                disabled={isDiscovering || !formData.base_url.trim()}
+              >
+                {isDiscovering
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <RefreshCw className="h-4 w-4 mr-2" />}
+                {isDiscovering ? 'Connecting…' : 'Connect & discover models'}
+              </Button>
+              {discoveryMessage && <p role="status" className="text-sm text-studio-success">{discoveryMessage}</p>}
+              {discoveryError && <p role="alert" className="text-sm text-studio-error">{discoveryError}</p>}
+              <div className="space-y-2">
+                <Label htmlFor="temperature">Text generation temperature</Label>
+                <Input
+                  id="temperature"
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={formData.temperature.toString()}
+                  onChange={event => setFormData(prev => ({
+                    ...prev,
+                    temperature: Number(event.target.value),
+                  }))}
+                />
+                <p className="text-xs text-studio-text-dim">Controls variation for local text inference (0–2).</p>
+                {errors.temperature && <p className="text-sm text-studio-error">{errors.temperature}</p>}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="api_key">API Key</Label>
+              <Input
+                id="api_key"
+                type="password"
+                value={formData.api_key}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, api_key: e.target.value }))}
+                placeholder="Enter your API key"
+              />
+              {errors.api_key && <p className="text-sm text-studio-error">{errors.api_key}</p>}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="active">Active Status</Label>
@@ -233,7 +376,7 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
               value={formData.rate_limit.toString()}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleRateLimitChange(e.target.value)}
             />
-            <p className="text-xs text-gray-600">Maximum requests allowed per minute</p>
+            <p className="text-xs text-studio-text-dim">Maximum requests allowed per minute</p>
           </div>
 
           <div className="space-y-2">
@@ -242,7 +385,7 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
               {availableModels.map(model => (
                 <div
                   key={model.value}
-                  className="flex items-center space-x-2 p-2 rounded border hover:bg-gray-50"
+                  className="flex items-center space-x-2 p-2 rounded border border-studio-border hover:bg-studio-panel-hover"
                 >
                   <Checkbox
                     id={`model-${model.value}`}
@@ -255,34 +398,38 @@ export const ApiProfileEditor: React.FC<ApiProfileEditorProps> = ({ profile, onS
                       <Badge variant="outline" className="text-xs">{model.type}</Badge>
                     </Label>
                     {model.pricing && (
-                      <p className="text-xs text-gray-500">{model.pricing}</p>
+                      <p className="text-xs text-studio-text-dim">{model.pricing}</p>
                     )}
                   </div>
                 </div>
               ))}
+              {isLocalProvider(formData.api_type) && availableModels.length === 0 && (
+                <p className="col-span-2 text-sm text-studio-text-dim">
+                  Discover models from the local runtime before saving this profile.
+                </p>
+              )}
             </div>
-            {errors.models && <p className="text-sm text-red-600">{errors.models}</p>}
+            {errors.models && <p className="text-sm text-studio-error">{errors.models}</p>}
           </div>
 
           {selectedModels.length > 0 && (
             <div className="space-y-2">
               <Label htmlFor="default_model">Default Model</Label>
-              <Select value={formData.default_model} onValueChange={(value: string) => setFormData(prev => ({ ...prev, default_model: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select default model" />
-                </SelectTrigger>
-                <SelectContent>
+              <Select
+                value={formData.default_model}
+                onValueChange={(value: string) => setFormData(prev => ({ ...prev, default_model: value }))}
+                placeholder="Select default model"
+              >
                   {selectedModels.map(modelValue => {
                     const model = availableModels.find(m => m.value === modelValue)
                     return (
-                      <SelectItem key={modelValue} value={modelValue}>
+                      <option key={modelValue} value={modelValue}>
                         {model?.label} ({modelValue})
-                      </SelectItem>
+                      </option>
                     )
                   })}
-                </SelectContent>
               </Select>
-              {errors.default_model && <p className="text-sm text-red-600">{errors.default_model}</p>}
+              {errors.default_model && <p className="text-sm text-studio-error">{errors.default_model}</p>}
             </div>
           )}
 

@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any
 from fastapi import WebSocket
-from project_service import project_service
+from project_service import SceneAnalysisUnavailableError, project_service
 
 logger = logging.getLogger("studio.backend.extensions.project")
 
@@ -21,7 +21,16 @@ async def handle_analyze_scene(websocket: WebSocket, message_payload: Dict[str, 
     image_b64 = message_payload.get("image_b64")
     audio_metadata = message_payload.get("audio_metadata")
     
-    analysis = await project_service.analyze_scene(image_b64, audio_metadata)
+    try:
+        analysis = await project_service.analyze_scene(image_b64, audio_metadata)
+    except SceneAnalysisUnavailableError as error:
+        await websocket.send_json({
+            "type": "error",
+            "operation": "analyze_scene",
+            "code": "SCENE_ANALYSIS_UNAVAILABLE",
+            "message": str(error),
+        })
+        return
     
     await websocket.send_json({
         "type": "scene_analysis_complete",

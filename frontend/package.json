@@ -22,7 +22,6 @@
     "react-i18next": "^17.0.9",
     "tailwind-merge": "^3.6.0",
     "tone": "^14.7.77",
-    "y-websocket": "^1.5.0",
     "yjs": "^13.6.10"
   },
   "devDependencies": {

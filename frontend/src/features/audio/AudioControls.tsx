@@ -1,25 +1,32 @@
 import React, { useState } from 'react';
+import { toast } from 'react-hot-toast';
 import { Music, Globe, RefreshCw, Sparkles, Sliders, FolderOpen } from 'lucide-react';
 import { useStudioStore } from '../../core/useStudioStore';
 import { StudioSelect, StudioToggle } from '../../features/common/components/Controls';
 import { useAudioComposition } from '../../hooks/useAudioComposition';
 import { useProjectConfig } from '../../core/useProjectConfig';
 
-import CollapsibleSidebar, { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
+import { SidebarSection } from '../../components/lookup/CollapsibleSidebar';
+import { DockSectionStack } from '../../components/layout/DockSectionStack';
 import AudioToolLookup from '../../components/lookup/AudioToolLookup';
 import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
 
 export const AudioControls: React.FC = () => {
-  const { yAudio } = useStudioStore();
+  const { yAudio, activateProject, flushPersistence } = useStudioStore();
   const { isComposing, compositionError, compose } = useAudioComposition();
-  const { autoSyncAudio, sceneMetadata, updateConfig, analyzeScene } = useProjectConfig();
+  const {
+    autoSyncAudio,
+    sceneMetadata,
+    isAnalyzingScene,
+    sceneAnalysisError,
+    updateConfig,
+    analyzeScene,
+  } = useProjectConfig();
   const [targetWorktree, setTargetWorktree] = useState<'main' | 'experimental'>('main');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [selectedTool, setSelectedTool] = useState('mixer');
 
-  const handleAnalyze = async () => {
-    setIsAnalyzing(true);
+  const handleAnalyze = () => {
     analyzeScene();
-    setTimeout(() => setIsAnalyzing(false), 2000); // Visual feedback
   };
 
   const composers = [
@@ -46,26 +53,20 @@ export const AudioControls: React.FC = () => {
   const effectKeys = ['eq', 'reverb', 'delay', 'compression'];
 
   return (
-    <div className="flex flex-col h-full bg-studio-panel overflow-hidden">
-      {/* Main Collapsible Sidebar */}
-      <CollapsibleSidebar
-        title="Audio Studio"
-        icon={Music}
-        defaultCollapsed={false}
-        minWidth={180}
-        maxWidth={280}
-        className="flex-shrink-0"
-      >
-        <div className="p-3 space-y-4">
+    <div className="h-full min-h-0 overflow-y-auto custom-scrollbar bg-studio-panel">
+      <DockSectionStack storageKey="studio-audio-sections:v1" className="space-y-2">
           <SidebarSection title="Project References" icon={FolderOpen}>
-            <ProjectReferenceLibrary />
+            <ProjectReferenceLibrary
+              onProjectChange={activateProject}
+              onBeforeExport={flushPersistence}
+            />
           </SidebarSection>
 
           {/* Tool Selection Section */}
           <SidebarSection title="Audio Tools" icon={Sliders}>
             <AudioToolLookup
-              activeTool="mixer"
-              onToolSelect={(tool) => console.log('Selected audio tool:', tool)}
+              activeTool={selectedTool}
+              onToolSelect={(tool) => { setSelectedTool(tool); toast.success(`Selected audio tool: ${tool}`); }}
               showCompact={false}
             />
           </SidebarSection>
@@ -136,12 +137,17 @@ export const AudioControls: React.FC = () => {
               <div className="bg-black/20 p-3 rounded border border-studio-border/30 flex flex-col gap-3">
                 <button 
                   onClick={handleAnalyze}
-                  disabled={isAnalyzing}
-                  className={`w-full py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-2 border transition-all ${isAnalyzing ? 'bg-purple-900/20 border-purple-900/50 text-purple-400' : 'bg-purple-900/10 border-purple-900/30 text-purple-400 hover:bg-purple-900/20'}`}
+                  disabled={isAnalyzingScene}
+                  className={`w-full py-1.5 rounded text-[10px] font-bold flex items-center justify-center gap-2 border transition-all ${isAnalyzingScene ? 'bg-purple-900/20 border-purple-900/50 text-purple-400' : 'bg-purple-900/10 border-purple-900/30 text-purple-400 hover:bg-purple-900/20'}`}
                 >
-                  {isAnalyzing ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                  <span>EXTRACT SCENE CONTEXT</span>
+                  {isAnalyzingScene ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                  <span>{isAnalyzingScene ? 'ANALYZING...' : 'EXTRACT SCENE CONTEXT'}</span>
                 </button>
+                {sceneAnalysisError && (
+                  <p role="alert" className="text-xs text-red-400">
+                    {sceneAnalysisError}
+                  </p>
+                )}
 
                 {sceneMetadata && sceneMetadata.mood && (
                   <div className="flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-500">
@@ -187,8 +193,7 @@ export const AudioControls: React.FC = () => {
               </p>
             )}
           </SidebarSection>
-        </div>
-      </CollapsibleSidebar>
+      </DockSectionStack>
     </div>
   );
 };

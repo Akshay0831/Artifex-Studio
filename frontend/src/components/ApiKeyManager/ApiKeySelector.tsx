@@ -2,9 +2,10 @@ import React, { useMemo } from 'react'
 import { useApiKey } from './ApiKeyContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/themed'
 import { Badge } from '@/components/ui/themed'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/themed'
+import { Select } from '@/components/ui/themed'
 import { Alert, AlertDescription } from '@/components/ui/themed'
 import { CheckCircle, AlertCircle, Zap, RefreshCw } from 'lucide-react'
+import { TruncatedText } from '../common/TruncatedText'
 
 export const ApiKeySelector: React.FC = () => {
   const { state, setCurrentProfile } = useApiKey()
@@ -67,10 +68,10 @@ export const ApiKeySelector: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Status Alert */}
-          <Alert className={status.type === 'error' ? 'border-red-200' : status.type === 'warning' ? 'border-yellow-200' : 'border-green-200'}>
-            {status.type === 'error' && <AlertCircle className="h-4 w-4 text-red-600" />}
-            {status.type === 'warning' && <RefreshCw className="h-4 w-4 text-yellow-600" />}
-            {status.type === 'success' && <CheckCircle className="h-4 w-4 text-green-600" />}
+          <Alert className={status.type === 'error' ? 'border-studio-error' : status.type === 'warning' ? 'border-studio-warning' : 'border-studio-success'}>
+            {status.type === 'error' && <AlertCircle className="h-4 w-4 text-studio-error" />}
+            {status.type === 'warning' && <RefreshCw className="h-4 w-4 text-studio-warning" />}
+            {status.type === 'success' && <CheckCircle className="h-4 w-4 text-studio-success" />}
             <AlertDescription>{status.message}</AlertDescription>
           </Alert>
 
@@ -81,36 +82,26 @@ export const ApiKeySelector: React.FC = () => {
               value={state.currentProfile || ''}
               onValueChange={handleProfileChange}
               disabled={activeProfiles.length === 0}
+              placeholder={activeProfiles.length === 0 ? 'No active profiles' : 'Select API profile'}
             >
-              <SelectTrigger>
-                <SelectValue placeholder={activeProfiles.length === 0 ? "No active profiles" : "Select API profile"} />
-              </SelectTrigger>
-              <SelectContent>
                 {activeProfiles.map(profile => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    <div className="flex items-center gap-2">
-                      <span>{getProviderIcon(profile.api_type)}</span>
-                      <span>{profile.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {profile.api_type.toUpperCase()}
-                      </Badge>
-                    </div>
-                  </SelectItem>
+                  <option key={profile.id} value={profile.id}>
+                    {getProviderIcon(profile.api_type)} {profile.name} ({profile.api_type.toUpperCase()})
+                  </option>
                 ))}
-              </SelectContent>
             </Select>
             {activeProfiles.length === 0 && (
-              <p className="text-xs text-red-600">Please add at least one active API profile to continue</p>
+              <p className="text-xs text-studio-error">Please add at least one active API profile to continue</p>
             )}
           </div>
 
           {/* Selected Profile Details */}
           {selectedProfile && (
-            <Card className="bg-blue-50 border-blue-200">
+            <Card className="bg-studio-card border-studio-border text-studio-text">
               <CardContent className="pt-4">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-semibold">{selectedProfile.name}</h4>
+                    <TruncatedText text={selectedProfile.name} className="font-semibold" />
                     <div className="flex items-center gap-2">
                       <span>{getProviderIcon(selectedProfile.api_type)}</span>
                       <Badge variant="default">{selectedProfile.api_type.toUpperCase()}</Badge>
@@ -119,19 +110,19 @@ export const ApiKeySelector: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-600">Default Model:</span>
+                      <span className="text-studio-text-dim">Default Model:</span>
                       <span className="ml-2 font-medium">{selectedProfile.default_model || 'None selected'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">Rate Limit:</span>
+                      <span className="text-studio-text-dim">Rate Limit:</span>
                       <span className="ml-2 font-medium">{selectedProfile.rate_limit}/min</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">Available Models:</span>
+                      <span className="text-studio-text-dim">Available Models:</span>
                       <span className="ml-2 font-medium">{selectedProfile.models.length}</span>
                     </div>
                     <div>
-                      <span className="text-gray-600">Usage Count:</span>
+                      <span className="text-studio-text-dim">Usage Count:</span>
                       <span className="ml-2 font-medium">{selectedProfile.usage_count}</span>
                     </div>
                   </div>
@@ -145,7 +136,7 @@ export const ApiKeySelector: React.FC = () => {
                           <Badge
                             key={modelId}
                             variant={modelId === selectedProfile.default_model ? "default" : "secondary"}
-                            className="cursor-pointer hover:bg-gray-200"
+                            className="cursor-pointer hover:bg-studio-hover"
                           >
                             {modelId}
                             {modelId === selectedProfile.default_model && (
@@ -171,18 +162,18 @@ export const ApiKeySelector: React.FC = () => {
                     key={profile.id}
                     className={`transition-all cursor-pointer ${
                       profile.id === state.currentProfile
-                        ? 'ring-2 ring-blue-500 bg-blue-50'
-                        : 'hover:bg-gray-50'
+                        ? 'ring-2 ring-studio-accent bg-studio-panel-selected'
+                        : 'hover:bg-studio-panel-hover'
                     }`}
                     onClick={() => handleProfileChange(profile.id)}
                   >
                     <CardContent className="pt-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
                           <span className="text-lg">{getProviderIcon(profile.api_type)}</span>
-                          <div>
-                            <h5 className="font-medium">{profile.name}</h5>
-                            <p className="text-sm text-gray-600">
+                          <div className="min-w-0">
+                            <TruncatedText text={profile.name} className="font-medium" />
+                            <p className="text-sm text-studio-text-dim">
                               {profile.models.length} models • {profile.rate_limit}/min
                             </p>
                           </div>
@@ -192,7 +183,7 @@ export const ApiKeySelector: React.FC = () => {
                             {profile.api_type.toUpperCase()}
                           </Badge>
                           {profile.id === state.currentProfile && (
-                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <CheckCircle className="h-4 w-4 text-studio-success" />
                           )}
                         </div>
                       </div>

@@ -49,6 +49,8 @@ def test_get_providers():
         "replicate",
         "runpod",
         "openai",
+        "ollama",
+        "lm_studio",
     }
 
 
@@ -91,6 +93,84 @@ def test_create_profile_rejects_unavailable_model():
 
     assert response.status_code == 400
     assert "invalid_model" in response.json()["error"]["detail"]
+
+
+def test_create_local_profile_accepts_custom_models_without_api_key():
+    response = client.post(
+        PROFILE_URL,
+        json=profile_payload(
+            name="Local Ollama",
+            api_key="",
+            api_type="ollama",
+            base_url="http://127.0.0.1:11434",
+            models=["custom-model:8b"],
+            default_model="custom-model:8b",
+        ),
+    )
+
+    assert response.status_code == 200
+    profile = response.json()
+    assert profile["api_type"] == "ollama"
+    assert profile["base_url"] == "http://127.0.0.1:11434"
+    assert profile["models"] == ["custom-model:8b"]
+    assert profile["temperature"] == 0.3
+
+
+def test_create_local_profile_rejects_temperature_outside_range():
+    response = client.post(
+        PROFILE_URL,
+        json=profile_payload(
+            name="Invalid local temperature",
+            api_key="",
+            api_type="ollama",
+            base_url="http://127.0.0.1:11434",
+            models=["custom-model:8b"],
+            default_model="custom-model:8b",
+            temperature=2.1,
+        ),
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_local_profile_rejects_non_loopback_url():
+    response = client.post(
+        PROFILE_URL,
+        json=profile_payload(
+            name="Remote Ollama",
+            api_key="",
+            api_type="ollama",
+            base_url="http://example.com:11434",
+            models=["custom-model:8b"],
+            default_model="custom-model:8b",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert "loopback" in response.json()["detail"]
+
+
+def test_local_model_discovery_reports_text_capability(monkeypatch):
+    async def fake_discover(provider, base_url):
+        assert provider == "lm_studio"
+        assert base_url == "http://127.0.0.1:1234/v1"
+        return [{"id": "local/custom-model", "name": "local/custom-model", "type": "text"}]
+
+    monkeypatch.setattr(
+        "routes.api_management.api_management.local_model_service.discover_models",
+        fake_discover,
+    )
+
+    response = client.post(
+        "/api/api-management/providers/lm_studio/discover",
+        json={"base_url": "http://127.0.0.1:1234/v1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["capabilities"] == ["text"]
+    assert response.json()["models"] == [
+        {"id": "local/custom-model", "name": "local/custom-model", "type": "text"}
+    ]
 
 
 def test_get_profile(profile_id):

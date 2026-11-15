@@ -1,13 +1,15 @@
 import React from 'react'
 import { useApiKey } from '../../components/ApiKeyManager/ApiKeyContext'
 import { Key, Plus, Settings } from 'lucide-react'
+import { TruncatedText } from '../../components/common/TruncatedText'
 
 interface ApiKeySidebarProps {
   onSelectProfile?: (profileId: string) => void
+  onOpenProfiles?: () => void
 }
 
-export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile }) => {
-  const { state, dispatch, setCurrentProfile } = useApiKey()
+export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile, onOpenProfiles }) => {
+  const { state, refreshProfiles, setCurrentProfile } = useApiKey()
   
   const handleProfileSelect = (profileId: string) => {
     setCurrentProfile(profileId)
@@ -27,8 +29,9 @@ export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile })
     return (
       <div className="text-center py-8">
         <div className="text-red-500 text-[10px] mb-2">Error loading profiles</div>
+        <p className="mb-3 break-words text-[10px] text-studio-text-dim" role="alert">{state.error}</p>
         <button 
-          onClick={() => dispatch({ type: 'SET_LOADING', payload: true })}
+          onClick={() => { void refreshProfiles() }}
           className="text-[9px] text-studio-accent hover:text-white"
         >
           Retry
@@ -44,7 +47,12 @@ export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile })
       <div className="text-center py-8">
         <Key className="h-8 w-8 text-studio-text-dim mx-auto mb-2" />
         <span className="text-[10px] text-studio-text-dim mb-4">No API profiles configured</span>
-        <button className="text-[9px] text-studio-accent hover:text-white">
+        <button
+          type="button"
+          onClick={onOpenProfiles}
+          disabled={!onOpenProfiles}
+          className="text-[9px] text-studio-accent hover:text-white disabled:opacity-50"
+        >
           <Plus className="inline h-3 w-3 mr-1" />
           Add Profile
         </button>
@@ -70,7 +78,7 @@ export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile })
           }`}
         >
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold">{profile.name}</span>
+            <TruncatedText text={profile.name} className="text-[11px] font-bold" />
             {profile.is_active && (
               <div className="w-2 h-2 bg-green-400 rounded-full"></div>
             )}
@@ -87,12 +95,22 @@ export const ApiKeySidebar: React.FC<ApiKeySidebarProps> = ({ onSelectProfile })
         </button>
       ))}
       
-      <button className="w-full p-3 rounded-lg border border-dashed border-studio-border text-studio-text-dim hover:text-studio-accent hover:border-studio-accent transition-all text-left">
+      <button
+        type="button"
+        onClick={onOpenProfiles}
+        disabled={!onOpenProfiles}
+        className="w-full min-w-0 p-3 rounded-lg border border-dashed border-studio-border text-studio-text-dim hover:text-studio-accent hover:border-studio-accent transition-all text-left disabled:opacity-50"
+      >
         <Plus className="inline h-3 w-3 mr-1" />
         <span className="text-[11px] font-bold">Add Profile</span>
       </button>
       
-      <button className="w-full p-3 rounded-lg bg-studio-panel border border-studio-border text-studio-text-dim hover:bg-studio-panel-hover transition-all text-left">
+      <button
+        type="button"
+        onClick={onOpenProfiles}
+        disabled={!onOpenProfiles}
+        className="w-full min-w-0 p-3 rounded-lg bg-studio-panel border border-studio-border text-studio-text-dim hover:bg-studio-panel-hover transition-all text-left disabled:opacity-50"
+      >
         <Settings className="inline h-3 w-3 mr-1" />
         <span className="text-[11px] font-bold">Manage Profiles</span>
       </button>

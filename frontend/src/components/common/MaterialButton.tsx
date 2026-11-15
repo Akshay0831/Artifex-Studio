@@ -1,5 +1,5 @@
 import React, { forwardRef, useState } from 'react'
-import { useThemeConfig, useDensity } from '../../core/ThemeConfigContext'
+import { SPACING_MULTIPLIERS, useThemeConfig } from '../../core/ThemeConfigContext'
 import { cn } from '../../utils/cn'
 
 export interface MaterialButtonProps {
@@ -27,36 +27,39 @@ const variantStyles = {
 }
 
 const sizeStyles = {
-  xs: 'text-xs py-1 px-2 rounded-md',
-  sm: 'text-sm py-2 px-3 rounded-md',
-  md: 'text-base py-2.5 px-4 rounded-lg',
-  lg: 'text-lg py-3 px-6 rounded-lg',
-  xl: 'text-xl py-4 px-8 rounded-xl',
-  icon: 'p-2'
+  xs: 'text-xs rounded-md',
+  sm: 'text-sm rounded-md',
+  md: 'text-base rounded-lg',
+  lg: 'text-lg rounded-lg',
+  xl: 'text-xl rounded-xl',
+  icon: 'rounded-md'
 }
 
-const densityStyles = {
+const buttonPadding = {
   compact: {
-    xs: 'px-2 py-1',
-    sm: 'px-3 py-1.5',
-    md: 'px-4 py-2',
-    lg: 'px-6 py-2.5',
-    xl: 'px-8 py-3'
+    xs: [0.5, 0.25],
+    sm: [0.75, 0.375],
+    md: [1, 0.5],
+    lg: [1.25, 0.625],
+    xl: [1.5, 0.75],
+    icon: [0.5, 0.5],
   },
   normal: {
-    xs: 'px-3 py-1.5',
-    sm: 'px-4 py-2',
-    md: 'px-5 py-2.5',
-    lg: 'px-7 py-3',
-    xl: 'px-9 py-4'
+    xs: [0.75, 0.375],
+    sm: [1, 0.5],
+    md: [1.25, 0.625],
+    lg: [1.75, 0.75],
+    xl: [2.25, 1],
+    icon: [0.5, 0.5],
   },
   comfortable: {
-    xs: 'px-4 py-2',
-    sm: 'px-5 py-2.5',
-    md: 'px-6 py-3',
-    lg: 'px-8 py-4',
-    xl: 'px-10 py-5'
-  }
+    xs: [1, 0.5],
+    sm: [1.25, 0.625],
+    md: [1.5, 0.75],
+    lg: [2, 1],
+    xl: [2.5, 1.25],
+    icon: [0.625, 0.625],
+  },
 }
 
 export const MaterialButton = forwardRef<HTMLButtonElement, MaterialButtonProps>(({
@@ -69,20 +72,19 @@ export const MaterialButton = forwardRef<HTMLButtonElement, MaterialButtonProps>
   endIcon,
   ripple = true,
   density: propDensity,
+  title,
   children,
   onClick,
   className,
   ...props
 }, ref) => {
   const { theme } = useThemeConfig()
-  const { scale } = useDensity()
   const [ripples, setRipples] = useState<Array<{ x: number; y: number; id: number }>>([])
-
   const density = propDensity || theme.density
   const baseStyles = 'font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2'
   const variantClass = variantStyles[variant]
   const sizeClass = sizeStyles[size]
-  const densityClass = densityStyles[density as keyof typeof densityStyles][size as keyof typeof densityStyles.normal]
+  const [horizontalPadding, verticalPadding] = buttonPadding[density][size]
   const disabledClass = disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
   const fullClass = fullWidth ? 'w-full' : ''
 
@@ -113,7 +115,6 @@ export const MaterialButton = forwardRef<HTMLButtonElement, MaterialButtonProps>
         baseStyles,
         variantClass,
         sizeClass,
-        densityClass,
         disabledClass,
         fullClass,
         'relative overflow-hidden',
@@ -121,9 +122,10 @@ export const MaterialButton = forwardRef<HTMLButtonElement, MaterialButtonProps>
       )}
       onClick={handleClick}
       disabled={disabled || loading}
+      title={title ?? (typeof children === 'string' || typeof children === 'number' ? String(children) : undefined)}
       style={{
-        transform: `scale(${scale})`,
-        transformOrigin: 'center'
+        gap: `${0.5 * SPACING_MULTIPLIERS[theme.spacing]}rem`,
+        padding: `${verticalPadding * SPACING_MULTIPLIERS[theme.spacing]}rem ${horizontalPadding * SPACING_MULTIPLIERS[theme.spacing]}rem`,
       }}
       {...props}
     >
@@ -149,15 +151,15 @@ export const MaterialButton = forwardRef<HTMLButtonElement, MaterialButtonProps>
       )}
       
       {/* Icon and content */}
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex min-w-0 max-w-full items-center justify-center gap-2">
         {startIcon && !loading && (
           <span className="flex-shrink-0">{startIcon}</span>
         )}
         
         {loading ? (
-          <span className="opacity-0">{children}</span>
+          <div className="opacity-0">{children}</div>
         ) : (
-          <span>{children}</span>
+          <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{children}</div>
         )}
         
         {endIcon && !loading && (

@@ -45,6 +45,14 @@ class ProjectBundleInvalidError(ValueError):
     pass
 
 
+class ProjectEditorStateTooLargeError(ValueError):
+    pass
+
+
+class ProjectEditorStateInvalidError(ValueError):
+    pass
+
+
 class ProjectAssetService:
     """Persists project metadata in SQLite and immutable media in project folders."""
 
@@ -70,6 +78,7 @@ class ProjectAssetService:
         max_image_pixels: int = 16_777_216,
         max_audio_seconds: int = 600,
         max_bundle_bytes: int = 512 * 1024 * 1024,
+        max_editor_state_bytes: int = 128 * 1024 * 1024,
     ):
         self.root = Path(projects_path).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -79,6 +88,7 @@ class ProjectAssetService:
         self.max_image_pixels = max_image_pixels
         self.max_audio_seconds = max_audio_seconds
         self.max_bundle_bytes = max_bundle_bytes
+        self.max_editor_state_bytes = max_editor_state_bytes
         self._initialize_database()
         self._recover_pending_deletions()
 
@@ -151,6 +161,25 @@ class ProjectAssetService:
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as file:
                 json.dump(value, file, ensure_ascii=False, indent=2)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary_name, path)
+        except Exception:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            raise
+
+    @staticmethod
+    def _write_bytes_atomic(path: Path, value: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as file:
+                file.write(value)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary_name, path)
@@ -435,6 +464,39 @@ class ProjectAssetService:
             config,
         )
 
+    def editor_state_path(self, project_id: str) -> Path:
+        return self.project_directory(project_id) / "editor-state.yjs"
+
+    def get_editor_state(self, project_id: str) -> Optional[bytes]:
+        project_id = self._canonical_id(project_id)
+        with self._connection() as connection:
+            self._get_project_row(connection, project_id)
+        path = self.editor_state_path(project_id)
+        if not path.is_file():
+            return None
+        data = path.read_bytes()
+        if not data:
+            raise ProjectEditorStateInvalidError("Stored editor state is empty")
+        if len(data) > self.max_editor_state_bytes:
+            raise ProjectEditorStateTooLargeError(
+                "Stored editor state exceeds the configured byte limit"
+            )
+        return data
+
+    def save_editor_state(self, project_id: str, data: bytes) -> None:
+        project_id = self._canonical_id(project_id)
+        if not data:
+            raise ProjectEditorStateInvalidError("Editor state must not be empty")
+        if len(data) > self.max_editor_state_bytes:
+            raise ProjectEditorStateTooLargeError(
+                "Editor state exceeds the configured byte limit"
+            )
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._get_project_row(connection, project_id)
+            self._write_bytes_atomic(self.editor_state_path(project_id), data)
+
     def delete_project(self, project_id: str) -> None:
         project_id = self._canonical_id(project_id)
         directory = self.project_directory(project_id)
@@ -714,12 +776,21 @@ class ProjectAssetService:
     def export_project_bundle(self, project_id: str) -> bytes:
         project = self.get_project(project_id)
         references = self.list_references(project_id)
+        editor_state = self.get_editor_state(project_id)
         if len(references) > self.MAX_BUNDLE_REFERENCES:
             raise ProjectBundleInvalidError("Project contains too many references to bundle")
         bundle_manifest = {
-            "format_version": 1,
+            "format_version": 2,
             "project": project,
             "references": references,
+            "editor_state": (
+                {
+                    "size_bytes": len(editor_state),
+                    "sha256": hashlib.sha256(editor_state).hexdigest(),
+                }
+                if editor_state is not None
+                else None
+            ),
         }
         manifest_data = json.dumps(
             bundle_manifest, ensure_ascii=False, indent=2
@@ -727,6 +798,8 @@ class ProjectAssetService:
         uncompressed_size = len(manifest_data) + sum(
             reference["size_bytes"] for reference in references
         )
+        if editor_state is not None:
+            uncompressed_size += len(editor_state)
         if uncompressed_size > self.max_bundle_bytes:
             raise ProjectBundleInvalidError("Project bundle exceeds the configured size limit")
         buffer = io.BytesIO()
@@ -738,6 +811,8 @@ class ProjectAssetService:
                     content_path,
                     f"references/{reference['id']}/{content_path.name}",
                 )
+            if editor_state is not None:
+                archive.writestr("editor-state.yjs", editor_state)
         bundle = buffer.getvalue()
         if len(bundle) > self.max_bundle_bytes:
             raise ProjectBundleInvalidError("Project bundle exceeds the configured size limit")
@@ -753,7 +828,7 @@ class ProjectAssetService:
 
         with archive:
             entries = archive.infolist()
-            if not entries or len(entries) > self.MAX_BUNDLE_REFERENCES + 1:
+            if not entries or len(entries) > self.MAX_BUNDLE_REFERENCES + 2:
                 raise ProjectBundleInvalidError("Project bundle contains an invalid number of files")
             names = set()
             total_uncompressed_bytes = 0
@@ -788,11 +863,44 @@ class ProjectAssetService:
 
             if (
                 not isinstance(manifest, dict)
-                or manifest.get("format_version") != 1
+                or manifest.get("format_version") not in {1, 2}
                 or not isinstance(manifest.get("project"), dict)
                 or not isinstance(manifest.get("references"), list)
             ):
                 raise ProjectBundleInvalidError("Project bundle manifest has an unsupported format")
+            format_version = manifest["format_version"]
+            if format_version == 2 and "editor_state" not in manifest:
+                raise ProjectBundleInvalidError("Project bundle is missing editor-state metadata")
+            editor_state = None
+            if format_version == 2 and manifest["editor_state"] is not None:
+                state_info = manifest["editor_state"]
+                if not isinstance(state_info, dict):
+                    raise ProjectBundleInvalidError("Editor-state metadata in the bundle is invalid")
+                state_size = state_info.get("size_bytes")
+                state_sha256 = state_info.get("sha256")
+                if (
+                    not isinstance(state_size, int)
+                    or isinstance(state_size, bool)
+                    or state_size <= 0
+                    or state_size > self.max_editor_state_bytes
+                    or not isinstance(state_sha256, str)
+                    or len(state_sha256) != 64
+                    or any(character not in "0123456789abcdef" for character in state_sha256.lower())
+                ):
+                    raise ProjectBundleInvalidError("Editor-state metadata in the bundle is invalid")
+                if "editor-state.yjs" not in names:
+                    raise ProjectBundleInvalidError("Project bundle is missing editor state")
+                if archive.getinfo("editor-state.yjs").file_size != state_size:
+                    raise ProjectBundleInvalidError("Editor-state size does not match the manifest")
+                try:
+                    editor_state = archive.read("editor-state.yjs")
+                except (KeyError, zipfile.BadZipFile) as error:
+                    raise ProjectBundleInvalidError("Editor state in the bundle is corrupt") from error
+                if (
+                    len(editor_state) != state_size
+                    or hashlib.sha256(editor_state).hexdigest() != state_sha256
+                ):
+                    raise ProjectBundleInvalidError("Editor-state checksum does not match the manifest")
             project = manifest["project"]
             if (
                 not isinstance(project.get("name"), str)
@@ -810,6 +918,8 @@ class ProjectAssetService:
             content_entries = names - {"manifest.json"}
             reference_payloads = []
             expected_entries = set()
+            if editor_state is not None:
+                expected_entries.add("editor-state.yjs")
             reference_ids = set()
             image_extensions = {
                 extension for _, extension in self.IMAGE_FORMATS.values()
@@ -890,6 +1000,8 @@ class ProjectAssetService:
                     role=role,
                     source=source,
                 )
+            if editor_state is not None:
+                self.save_editor_state(created_project["id"], editor_state)
         except Exception as error:
             try:
                 self.delete_project(created_project["id"])

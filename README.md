@@ -4,18 +4,27 @@ Artifex Studio is a local-first creative studio with a React/TypeScript frontend
 
 ## Key Capabilities
 - **Image Editing**: Canvas editing, generation controls, and post-generation palette/color-limit options
-- **Project References**: Local image/audio reference storage, inline previews, and portable project bundles
+- **Projects and References**: Edit local project metadata, store image/audio references, preview originals, and import/export portable project bundles
 - **Audio Tools**: Multi-track editing foundations; audio generation currently reports unavailable because no production composition backend is configured
-- **Provider Integration**: Optional configured AI providers for supported generation paths
+- **Provider Integration**: Optional cloud profiles and local Ollama/LM Studio text-model profiles
 - **Cross-Platform**: Native support for Windows, macOS, and Linux
-- **Persistence**: Project metadata and validated reference files stored locally
+- **Persistence**: Project metadata, editor state, and validated reference files stored locally
 - **Web Interface**: Modern React frontend with Tailwind CSS UI
 
 ## Features
 
 - **Palette constraints**: Fixed palettes, maximum color counts, extracted output palettes, dithering, and alpha preservation
-- **Portable project assets**: Export/import bundles containing project metadata and original reference assets (canvas/Yjs editing state is not included yet)
+- **Reference palettes**: Extract a bounded palette from an explicitly selected image reference and apply it as fixed post-generation colors; the source image is not sent to the model
+- **Project metadata**: Create projects and edit their names, descriptions, and tags in either editor sidebar
+- **Portable projects**: Export/import bundles containing project metadata, original reference assets, and per-project Yjs editor state
 - **Local references**: Image/audio references can be uploaded, previewed, and reused from the Art and Audio sidebars
+- **Local text models**: Discover installed Ollama or LM Studio models, configure a loopback endpoint and temperature, and use the selected model for Art prompt refinement
+
+## Workspace appearance and layout
+- Theme mode (light, dark, or system), accent, spacing, density, corner radius, and motion settings are persisted locally and configured together in **Theme Settings**. The setting controls the studio theme tokens, spacing utilities, and rem-based sizing; some feature-specific styles still need further tokenization.
+- The controls, editor, and history/activity panels can be dragged between left, center, and right docks, stacked as tabs, collapsed, and resized. Their arrangement and widths persist in browser storage; **Reset panel layout** restores the default workspace. Art/Audio control sections and activity sections can also be reordered or collapsed. Labels disappear when a panel is too narrow to show them, with full names available through tooltips and accessibility labels.
+- Ollama and LM Studio profiles discover installed models from loopback runtimes and currently support text inference only. Selecting a local profile enables real text-model refinement of Art prompts; without one, the existing prompt expander only appends built-in style terms. Local models do not generate or condition images, compose audio, or analyze references. Audio text-model workflows remain future work.
+- The frontend uses same-origin HTTP and WebSocket requests by default (including the Vite development proxy); set `VITE_API_BASE_URL` or `VITE_WS_URL` only to use a separate backend origin. Image/audio generation requires the backend WebSocket transport. The status indicator distinguishes an available HTTP health endpoint from a disconnected/missing WebSocket runtime.
 
 > **Capability status:** Project sharing/authorization, reference-conditioned image generation, audio-reference analysis/MIDI extraction, and training are not implemented. Audio composition currently returns an explicit unavailable error; no placeholder output is reported as generated audio.
 
@@ -57,7 +66,12 @@ The Linux alpha bundle uses CPU-only PyTorch to stay below GitHub's per-file rel
 ### Alpha limitations
 - Audio composition currently returns an explicit unavailable error; no production music-generation backend is configured.
 - Audio-reference analysis, MIDI transcription, reference-conditioned image/audio generation, multi-user sharing/authorization, and training are not implemented.
+- Local model support is limited to Ollama/LM Studio text inference for Art prompt refinement; local image generation and text-to-audio composition are not implemented.
+- Scene-context extraction is also unavailable; the UI reports that state rather than returning sample metadata.
+- Generation requests fail visibly when the WebSocket backend is disconnected. In-flight generation cannot currently be cancelled; the UI warns that server work may continue.
+- API and local-model profiles are currently held in backend memory and are cleared when the backend restarts; profile persistence is not implemented.
 - Image palette limits are applied to generated output; they do not condition the model or derive palettes from stored references.
+- Editor state is autosaved by the local backend for the selected project and included in project bundles; without a selected project it is not persisted. Real-time multi-user collaboration is not implemented.
 - Local project storage is not permission-controlled. Do not expose the server to an untrusted network.
 - Native alpha bundles are unsigned and may trigger operating-system security warnings. Extract them to a user-writable location; project data is stored in the user's application-data directory.
 

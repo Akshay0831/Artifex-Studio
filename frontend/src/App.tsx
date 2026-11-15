@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, Settings, Github, Palette } from 'lucide-react'
+import { Activity, Settings, HelpCircle, History, Palette, X } from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import { FullScreenLoader } from './components/common/LoadingSpinner'
@@ -11,15 +11,25 @@ import { EXTENSION_REGISTRY } from './features/registry'
 import { StudioErrorBoundary } from './features/common/components/StudioErrorBoundary'
 import { GlobalErrorBoundary } from './features/common/components/StudioErrorBoundary'
 import { ThemeProvider, useTheme } from './core/ThemeContext'
-import { ThemeToggle } from './components/common/ThemeToggle'
 import { ThemeConfigProvider } from './core/ThemeConfigContext'
+import { ApiKeyProvider } from './components/ApiKeyManager/ApiKeyContext'
 import { KeyboardShortcutsHelp } from './core/KeyboardShortcuts'
 import { COMMON_SHORTCUTS, useKeyboardShortcuts } from './core/KeyboardShortcuts'
 import { MaterialButton } from './components/common/MaterialButton'
 import { ThemeCustomizationPanel } from './components/ThemeCustomizationPanel'
+import { DockWorkspace } from './components/layout/DockWorkspace'
 
 function InnerApp() {
-  const { connected, metrics } = useStudioStore()
+  const {
+    connected,
+    metrics,
+    activeProjectId,
+    persistenceReady,
+    persistenceStatus,
+    persistenceError,
+    retryPersistence,
+    activateProject,
+  } = useStudioStore()
   const { isReviewMode, discardProposal, activeProposalId } = useWorktree()
   const [activeExtId, setActiveExtId] = useState(EXTENSION_REGISTRY[0].id)
   const [isLoaded, setIsLoaded] = useState(false)
@@ -57,10 +67,32 @@ function InnerApp() {
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [])
 
-  if (!isLoaded) {
+  if (!isLoaded || !persistenceReady) {
+    if (persistenceStatus === 'error') {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 bg-studio-background p-6 text-center">
+          <h1 className="text-lg font-bold text-studio-text">Could not load project editor state</h1>
+          <p className="max-w-xl text-sm text-studio-text-dim">{persistenceError}</p>
+          <MaterialButton
+            variant="outline"
+            onClick={() => { void retryPersistence().catch(() => undefined) }}
+          >
+            Retry
+          </MaterialButton>
+          <MaterialButton
+            variant="ghost"
+            onClick={() => { void activateProject(null).catch(() => undefined) }}
+          >
+            Continue without project
+          </MaterialButton>
+        </div>
+      )
+    }
     return (
       <GlobalErrorBoundary>
-        <FullScreenLoader message="Initializing Unified Editing Studio..." />
+        <FullScreenLoader
+          message={persistenceStatus === 'loading' ? 'Loading project editor state...' : 'Initializing Unified Editing Studio...'}
+        />
       </GlobalErrorBoundary>
     )
   }
@@ -68,7 +100,12 @@ function InnerApp() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Toaster position="top-right" toastOptions={{
-        style: { background: '#222', color: '#fff', fontSize: '11px', border: '1px solid #333' }
+        style: {
+          background: 'rgb(var(--studio-panel))',
+          color: 'rgb(var(--studio-text))',
+          fontSize: '11px',
+          border: '1px solid rgb(var(--studio-border))',
+        }
       }} />
       
       {/* Help Modal */}
@@ -79,7 +116,7 @@ function InnerApp() {
               <h2 className="text-lg font-bold text-studio-text">Help & Shortcuts</h2>
               <div className="flex items-center gap-2">
                 <MaterialButton variant="ghost" size="icon" onClick={() => setShowHelp(false)}>
-                  <Activity size={16} />
+                  <X size={16} />
                 </MaterialButton>
               </div>
             </div>
@@ -88,7 +125,7 @@ function InnerApp() {
               <div className="mt-6 p-4 bg-studio-background rounded-lg">
                 <h3 className="font-medium text-studio-text mb-2">Quick Tips</h3>
                 <ul className="text-sm text-studio-text-dim space-y-1">
-                  <li>• Use Ctrl/Cmd+U to cycle through themes</li>
+                  <li>• Use Theme Settings to change appearance options</li>
                   <li>• Press F1 or Ctrl/Cmd+H to see all shortcuts</li>
                   <li>• Mouse over buttons to see tooltips</li>
                   <li>• Extensions can be switched from the sidebar</li>
@@ -106,7 +143,7 @@ function InnerApp() {
             <button
               key={ext.id}
               onClick={() => setActiveExtId(ext.id)}
-              className={`p-2 rounded-lg transition-all ${activeExtId === ext.id ? 'bg-studio-accent text-white shadow-lg' : 'text-studio-text-dim hover:text-white hover:bg-studio-hover'}`}
+              className={`p-2 rounded-lg transition-all ${activeExtId === ext.id ? 'bg-studio-accent text-white shadow-lg' : 'text-studio-text-dim hover:text-studio-text hover:bg-studio-hover'}`}
               title={ext.name}
             >
               <ext.icon size={20} />
@@ -118,7 +155,7 @@ function InnerApp() {
             <LanguageSwitcher compact />
           </div>
           
-          {/* Theme Toggle & Customization */}
+          {/* Appearance settings */}
           <div className="flex-1 flex flex-col justify-end gap-2">
             <MaterialButton
               variant="ghost"
@@ -128,7 +165,6 @@ function InnerApp() {
             >
               <Palette size={16} />
             </MaterialButton>
-            <ThemeToggle />
           </div>
         </div>
 
@@ -149,18 +185,42 @@ function InnerApp() {
               </div>
             </div>
           )}
-          <div className="flex flex-1 min-h-0 overflow-hidden">
-            <StudioErrorBoundary key={`${activeExt.id}-controls`}>
-              <activeExt.sidebarControls />
-            </StudioErrorBoundary>
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <StudioErrorBoundary key={activeExt.id}>
-                <activeExt.primaryView />
-              </StudioErrorBoundary>
-            </div>
-          </div>
+          <DockWorkspace
+            panels={[
+              {
+                id: 'controls',
+                title: `${activeExt.name} Controls`,
+                icon: activeExt.icon,
+                defaultZone: 'left',
+                content: (
+                  <StudioErrorBoundary key={`${activeExt.id}-controls`}>
+                    <activeExt.sidebarControls />
+                  </StudioErrorBoundary>
+                ),
+              },
+              {
+                id: 'editor',
+                title: `${activeExt.name} Editor`,
+                icon: activeExt.icon,
+                defaultZone: 'center',
+                content: (
+                  <StudioErrorBoundary key={activeExt.id}>
+                    <activeExt.primaryView />
+                  </StudioErrorBoundary>
+                ),
+              },
+              {
+                id: 'history',
+                title: 'History & Activity',
+                icon: History,
+                defaultZone: 'right',
+                content: (
+                  <ChatPanel activeExtension={activeExt} onOpenProfiles={() => setActiveExtId('api-keys')} />
+                ),
+              },
+            ]}
+          />
         </div>
-        <ChatPanel activeExtension={activeExt} />
       </div>
 
       {/* Theme Customization Modal */}
@@ -191,10 +251,36 @@ function InnerApp() {
         </div>
       )}
 
+      {persistenceStatus === 'loading' && persistenceReady && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 text-sm font-bold text-white">
+          Loading project editor state...
+        </div>
+      )}
+
       {/* Bottom Status Bar */}
       <div className={`h-6 ${connected ? 'bg-studio-accent' : 'bg-studio-error'} text-white flex items-center px-3 justify-between text-[10px] font-bold`}>
         <div className="flex items-center gap-4">
           <ApiStatusChecker />
+          <div className="flex items-center gap-1" title={persistenceError || undefined}>
+            <span>
+              EDITOR: {persistenceStatus === 'saving'
+                ? 'SAVING'
+                : persistenceStatus === 'error'
+                  ? 'SAVE ERROR'
+                  : activeProjectId
+                    ? 'SAVED'
+                    : 'NO PROJECT'}
+            </span>
+            {persistenceStatus === 'error' && (
+              <button
+                type="button"
+                onClick={() => { void retryPersistence().catch(() => undefined) }}
+                className="underline underline-offset-2"
+              >
+                Retry
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             <Activity size={10} />
             <span>CORE: {metrics?.status === 'ok' ? 'ACTIVE' : 'STARTING'}</span>
@@ -219,11 +305,11 @@ function InnerApp() {
               title="Help (F1)"
               className="h-6 w-6 p-0"
             >
-              <Github size={12} />
+              <HelpCircle size={12} />
             </MaterialButton>
           </div>
         </div>
-        <div className="text-xs text-white/80">
+        <div className="text-xs text-white/80 truncate" title={`Theme: ${theme}`}>
           Theme: {theme} {isDark ? '🌙' : '☀️'}
         </div>
       </div>
@@ -233,13 +319,15 @@ function InnerApp() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <ThemeConfigProvider>
-        <GlobalErrorBoundary>
-          <InnerApp />
-        </GlobalErrorBoundary>
-      </ThemeConfigProvider>
-    </ThemeProvider>
+    <ApiKeyProvider>
+      <ThemeProvider>
+        <ThemeConfigProvider>
+          <GlobalErrorBoundary>
+            <InnerApp />
+          </GlobalErrorBoundary>
+        </ThemeConfigProvider>
+      </ThemeProvider>
+    </ApiKeyProvider>
   )
 }
 

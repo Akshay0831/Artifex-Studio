@@ -1,12 +1,14 @@
 import React from 'react'
-import { useThemeConfig } from '../core/ThemeConfigContext'
+import { useThemeConfig, type MaterialTheme } from '../core/ThemeConfigContext'
+import { useTheme, type ThemeMode } from '../core/ThemeContext'
 import { MaterialCard, MaterialCardHeader, MaterialCardContent, MaterialCardFooter } from './common/MaterialCard'
 import { MaterialButton } from './common/MaterialButton'
 
 export const ThemeCustomizationPanel: React.FC = () => {
   const { theme, setTheme } = useThemeConfig()
+  const { theme: themeMode, setTheme: setThemeMode } = useTheme()
 
-  const spacingOptions = [
+  const spacingOptions: { key: MaterialTheme['spacing']; label: string; description: string }[] = [
     { key: 'tight', label: 'Tight', description: 'Maximum space efficiency' },
     { key: 'normal', label: 'Normal', description: 'Balanced spacing' },
     { key: 'comfortable', label: 'Comfortable', description: 'Extra breathing room' },
@@ -14,27 +16,27 @@ export const ThemeCustomizationPanel: React.FC = () => {
     { key: 'extra-spacious', label: 'Extra Spacious', description: 'Maximum spacing' }
   ]
 
-  const densityOptions = [
+  const densityOptions: { key: MaterialTheme['density']; label: string; description: string }[] = [
     { key: 'compact', label: 'Compact', description: 'More content, less space' },
     { key: 'normal', label: 'Normal', description: 'Balanced density' },
     { key: 'comfortable', label: 'Comfortable', description: 'More relaxed spacing' }
   ]
 
-  const borderRadiusOptions = [
+  const borderRadiusOptions: { key: MaterialTheme['borderRadius']; label: string; description: string }[] = [
     { key: 'minimal', label: 'Minimal', description: 'Sharp corners' },
     { key: 'normal', label: 'Normal', description: 'Standard rounding' },
     { key: 'rounded', label: 'Rounded', description: 'Softer corners' },
     { key: 'extra-rounded', label: 'Extra Rounded', description: 'Very soft corners' }
   ]
 
-  const animationOptions = [
+  const animationOptions: { key: MaterialTheme['animations']; label: string; description: string }[] = [
     { key: 'none', label: 'None', description: 'No animations' },
     { key: 'minimal', label: 'Minimal', description: 'Subtle animations' },
     { key: 'standard', label: 'Standard', description: 'Balanced animations' },
     { key: 'enhanced', label: 'Enhanced', description: 'Rich animations' }
   ]
 
-  const accentColors = [
+  const accentColors: { key: MaterialTheme['accentColor']; label: string; color: string }[] = [
     { key: 'primary', label: 'Primary', color: 'bg-indigo-500' },
     { key: 'secondary', label: 'Secondary', color: 'bg-violet-500' },
     { key: 'accent', label: 'Accent', color: 'bg-blue-500' },
@@ -43,10 +45,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
     { key: 'warning', label: 'Warning', color: 'bg-yellow-500' }
   ]
 
-  const themeModes = [
-    { key: 'light', label: 'Light', icon: '☀️' },
-    { key: 'dark', label: 'Dark', icon: '🌙' },
-    { key: 'auto', label: 'Auto', icon: '🌗' }
+  const themeModes: { key: ThemeMode; label: string; icon: string; description: string }[] = [
+    { key: 'light', label: 'Light', icon: '☀️', description: 'Use the light color palette' },
+    { key: 'dark', label: 'Dark', icon: '🌙', description: 'Use the dark color palette' },
+    { key: 'auto', label: 'Auto', icon: '🌗', description: 'Follow your system color preference' }
   ]
 
   return (
@@ -64,9 +66,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {themeModes.map((mode) => (
               <MaterialButton
                 key={mode.key}
-                variant={theme.mode === mode.key ? 'primary' : 'ghost'}
+                title={mode.description}
+                variant={themeMode === mode.key ? 'primary' : 'ghost'}
                 size="sm"
-                onClick={() => setTheme({ mode: mode.key as any })}
+                onClick={() => setThemeMode(mode.key)}
                 className="flex items-center gap-2"
               >
                 <span>{mode.icon}</span>
@@ -83,9 +86,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {spacingOptions.map((option) => (
               <MaterialButton
                 key={option.key}
+                title={option.description}
                 variant={theme.spacing === option.key ? 'primary' : 'outline'}
                 size="sm"
-                onClick={() => setTheme({ spacing: option.key as any })}
+                onClick={() => setTheme({ spacing: option.key })}
                 className="text-left h-auto p-3"
               >
                 <div className="font-medium">{option.label}</div>
@@ -102,9 +106,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {densityOptions.map((density) => (
               <MaterialButton
                 key={density.key}
+                title={density.description}
                 variant={theme.density === density.key ? 'primary' : 'outline'}
                 size="sm"
-                onClick={() => setTheme({ density: density.key as any })}
+                onClick={() => setTheme({ density: density.key })}
               >
                 {density.label}
               </MaterialButton>
@@ -119,9 +124,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {borderRadiusOptions.map((radius) => (
               <MaterialButton
                 key={radius.key}
+                title={radius.description}
                 variant={theme.borderRadius === radius.key ? 'primary' : 'outline'}
                 size="sm"
-                onClick={() => setTheme({ borderRadius: radius.key as any })}
+                onClick={() => setTheme({ borderRadius: radius.key })}
               >
                 {radius.label}
               </MaterialButton>
@@ -136,9 +142,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {accentColors.map((color) => (
               <MaterialButton
                 key={color.key}
+                title={`${color.label} accent`}
                 variant={theme.accentColor === color.key ? 'primary' : 'outline'}
                 size="sm"
-                onClick={() => setTheme({ accentColor: color.key as any })}
+                onClick={() => setTheme({ accentColor: color.key })}
                 className="flex items-center gap-2"
               >
                 <div className={`w-4 h-4 rounded-full ${color.color}`} />
@@ -155,9 +162,10 @@ export const ThemeCustomizationPanel: React.FC = () => {
             {animationOptions.map((animation) => (
               <MaterialButton
                 key={animation.key}
+                title={animation.description}
                 variant={theme.animations === animation.key ? 'primary' : 'outline'}
                 size="sm"
-                onClick={() => setTheme({ animations: animation.key as any })}
+                onClick={() => setTheme({ animations: animation.key })}
               >
                 {animation.label}
               </MaterialButton>
@@ -170,9 +178,8 @@ export const ThemeCustomizationPanel: React.FC = () => {
         <MaterialButton
           variant="secondary"
           onClick={() => {
-            // Reset to defaults
+            setThemeMode('dark')
             setTheme({
-              mode: 'dark',
               density: 'normal',
               spacing: 'normal',
               accentColor: 'primary',

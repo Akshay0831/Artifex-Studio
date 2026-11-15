@@ -6,6 +6,7 @@ import AudioMixer from './audio/AudioMixer';
 import { AudioControls } from './audio/AudioControls';
 import { ApiKeyManager } from '../components/ApiKeyManager';
 import { ApiKeySidebar } from './common/ApiKeySidebar';
+import { EXTENSION_STATE_DEFINITIONS } from './extensionState';
 
 export interface ExtensionManifest {
   id: string;
@@ -17,53 +18,30 @@ export interface ExtensionManifest {
   initialState?: Record<string, any>;
 }
 
+const extensionStateById = Object.fromEntries(
+  EXTENSION_STATE_DEFINITIONS.map(definition => [definition.id, definition]),
+);
+
 export const EXTENSION_REGISTRY: ExtensionManifest[] = [
   {
-    id: 'art',
     name: 'Art Studio',
     icon: Image,
     primaryView: ImageEditor,
     sidebarControls: ArtControls,
-    stateKey: 'image',
-    initialState: {
-      steps: 20,
-      model: 'sdxl',
-      ultra_detail: false,
-      fast_mode: true
-    }
+    ...extensionStateById.art,
   },
   {
-    id: 'audio',
     name: 'Audio Mixer',
     icon: Music,
     primaryView: AudioMixer,
     sidebarControls: AudioControls,
-    stateKey: 'audio',
-    initialState: {
-      bpm: 120,
-      key: 'C',
-      scale: 'Major',
-      mood: 'Neutral',
-      composer: 'standard',
-      effects: { eq: true, reverb: false, delay: false, compression: true },
-      layers: [
-        { name: 'Bass', volume: 0, pan: 0, active: true },
-        { name: 'Lead', volume: 0, pan: 0, active: true },
-        { name: 'Drums', volume: 0, pan: 0, active: true },
-        { name: 'Ambient', volume: 0, pan: 0, active: false },
-      ]
-    }
+    ...extensionStateById.audio,
   },
   {
-    id: 'api-keys',
     name: 'API Manager',
     icon: Key,
     primaryView: ApiKeyManager,
     sidebarControls: ApiKeySidebar,
-    stateKey: 'api',
-    initialState: {
-      activeProfiles: [],
-      selectedProvider: null
-    }
+    ...extensionStateById['api-keys'],
   }
 ];

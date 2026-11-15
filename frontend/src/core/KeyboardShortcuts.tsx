@@ -158,15 +158,6 @@ export const COMMON_SHORTCUTS: Shortcut[] = [
     category: 'UI'
   },
   
-  // Media Controls
-  {
-    key: 'u',
-    ctrl: true,
-    description: 'Cycle theme (Light/Dark/Auto)',
-    action: () => console.log('Cycle theme'),
-    category: 'Appearance'
-  },
-  
   // Workspace
   {
     key: 'Tab',

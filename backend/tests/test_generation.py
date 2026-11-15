@@ -73,6 +73,101 @@ def test_generation_forwards_explicit_zero_and_optional_settings(
     }
 
 
+def test_local_text_generation_forwards_profile_and_temperature(monkeypatch):
+    profile_id = str(uuid4())
+    profiles_db[profile_id] = {
+        "id": profile_id,
+        "name": "Local Ollama",
+        "api_type": "ollama",
+        "base_url": "http://127.0.0.1:11434",
+        "api_key": "",
+        "is_active": True,
+        "models": ["custom-model:8b"],
+        "default_model": "custom-model:8b",
+        "rate_limit": 60,
+        "usage_count": 0,
+        "last_used": None,
+    }
+    received = {}
+
+    async def fake_generation_request(**kwargs):
+        received.update(kwargs)
+        return {"id": "test-text", "status": "completed", "result": "refined prompt"}
+
+    monkeypatch.setattr(api_service, "make_generation_request", fake_generation_request)
+
+    try:
+        response = client.post(
+            "/api/generation/generate",
+            json={
+                "prompt": "Make this more descriptive.",
+                "model": "custom-model:8b",
+                "api_profile_id": profile_id,
+                "generation_type": "text",
+                "temperature": 0.2,
+                "system_prompt": "Rewrite while preserving intent.",
+            },
+        )
+    finally:
+        profiles_db.pop(profile_id, None)
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "refined prompt"
+    assert received["temperature"] == 0.2
+    assert received["system_prompt"] == "Rewrite while preserving intent."
+    assert received["provider_config"]["api_type"] == "ollama"
+    assert received["provider_config"]["base_url"] == "http://127.0.0.1:11434"
+
+
+def test_system_prompt_is_rejected_for_non_local_profiles(active_profile):
+    response = client.post(
+        "/api/generation/generate",
+        json={
+            "prompt": "A test prompt",
+            "model": "stable-diffusion",
+            "api_profile_id": active_profile,
+            "generation_type": "text",
+            "system_prompt": "Rewrite the prompt.",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "only for local text generation" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("generation_type", ["image", "audio"])
+def test_local_text_profiles_reject_non_text_generation(generation_type):
+    profile_id = str(uuid4())
+    profiles_db[profile_id] = {
+        "id": profile_id,
+        "name": "Local Ollama",
+        "api_type": "ollama",
+        "base_url": "http://127.0.0.1:11434",
+        "api_key": "",
+        "is_active": True,
+        "models": ["custom-model:8b"],
+        "default_model": "custom-model:8b",
+        "rate_limit": 60,
+        "usage_count": 0,
+        "last_used": None,
+    }
+    try:
+        response = client.post(
+            "/api/generation/generate",
+            json={
+                "prompt": "A test prompt",
+                "model": "custom-model:8b",
+                "api_profile_id": profile_id,
+                "generation_type": generation_type,
+            },
+        )
+    finally:
+        profiles_db.pop(profile_id, None)
+
+    assert response.status_code == 400
+    assert "text generation only" in response.json()["detail"]
+
+
 @pytest.mark.parametrize(
     ("service_result", "expected_status"),
     [

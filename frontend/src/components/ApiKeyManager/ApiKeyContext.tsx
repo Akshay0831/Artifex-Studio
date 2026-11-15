@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react'
+import React, { createContext, useCallback, useContext, useReducer, useEffect, useRef, ReactNode } from 'react'
 import { ApiProfile, ApiKeyState } from '../../types/api'
 import { ApiErrorHandler } from '../../utils/apiErrorHandler'
 
@@ -38,6 +38,13 @@ const initialState: ApiKeyState = {
   error: null
 }
 
+function isApiProfileResponse(value: unknown): value is { profiles: ApiProfile[] } {
+  return typeof value === 'object' &&
+    value !== null &&
+    'profiles' in value &&
+    Array.isArray(value.profiles)
+}
+
 function apiKeyReducer(state: ApiKeyState, action: ApiKeyAction): ApiKeyState {
   switch (action.type) {
     case 'SET_PROFILES':
@@ -47,7 +54,8 @@ function apiKeyReducer(state: ApiKeyState, action: ApiKeyAction): ApiKeyState {
           acc[profile.id] = profile
           return acc
         }, {} as Record<string, ApiProfile>),
-        isLoading: false
+        isLoading: false,
+        error: null
       }
     case 'SET_CURRENT_PROFILE':
       return {
@@ -104,18 +112,24 @@ interface ApiKeyProviderProps {
 
 export const ApiKeyProvider: React.FC<ApiKeyProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(apiKeyReducer, initialState)
+  const refreshController = useRef<AbortController | null>(null)
 
-  // Load profiles on mount
-  useEffect(() => {
-    refreshProfiles()
-  }, [])
-
-  const refreshProfiles = async () => {
+  const refreshProfiles = useCallback(async () => {
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
     dispatch({ type: 'SET_LOADING', payload: true })
+    const timeout = window.setTimeout(() => controller.abort(), 15000)
+
     try {
-      const response = await fetch('/api/api-management/profiles')
+      const response = await fetch('/api/api-management/profiles', {
+        signal: controller.signal,
+      })
       if (response.ok) {
-        const data = await response.json()
+        const data: unknown = await response.json()
+        if (!isApiProfileResponse(data)) {
+          throw new Error('The backend returned an invalid API profile list.')
+        }
         dispatch({ type: 'SET_PROFILES', payload: data.profiles })
       } else {
         const error = new Error('Failed to load API profiles') as ApiError
@@ -123,9 +137,28 @@ export const ApiKeyProvider: React.FC<ApiKeyProviderProps> = ({ children }) => {
         dispatch({ type: 'SET_ERROR', payload: ApiErrorHandler.handleError(error) })
       }
     } catch (error) {
+      if (refreshController.current !== controller) return
+      if (controller.signal.aborted) {
+        dispatch({
+          type: 'SET_ERROR',
+          payload: 'Loading API profiles timed out. Check the backend connection and try again.',
+        })
+        return
+      }
       dispatch({ type: 'SET_ERROR', payload: ApiErrorHandler.handleError(error) })
+    } finally {
+      window.clearTimeout(timeout)
+      if (refreshController.current === controller) refreshController.current = null
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    void refreshProfiles()
+    return () => {
+      refreshController.current?.abort()
+      refreshController.current = null
+    }
+  }, [refreshProfiles])
 
   const setCurrentProfile = (profileId: string) => {
     dispatch({ type: 'SET_CURRENT_PROFILE', payload: profileId })

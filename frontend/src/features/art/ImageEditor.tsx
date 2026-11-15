@@ -1,52 +1,72 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react';
-import { Canvas, PencilBrush, FabricImage, Path } from 'fabric';
-import { MousePointer2, Eraser, Brush, Download, Undo2, Redo2, Layers, Activity, Square, Palette } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Canvas, PencilBrush, FabricImage, Point } from 'fabric';
+import { 
+  Download, 
+  Undo2, 
+  Redo2, 
+  Layers, 
+  SlidersHorizontal, 
+  Image as ImageIcon,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Hand,
+  Paintbrush
+} from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useStudioStore } from '../../core/useStudioStore';
 import { useWorktree } from '../../core/useWorktree';
 import { useImageEditor } from '../../hooks/useImageEditor';
+import { DockWorkspace } from '../../components/layout/DockWorkspace';
 import LayerManager from './LayerManager';
 import EditingTools from './EditingTools';
-import ColorToneTools from './ColorToneTools';
-import DynamicToolRegistry from './DynamicToolRegistry';
-import DynamicComponentFactory from './DynamicComponentFactory';
-import PluginSystem from './PluginSystem';
-import { ToolType, ToolSettings, Point } from './types';
+import { ToolType, ToolSettings } from './types';
 
 const ImageEditor: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const { yImage, yExperimental } = useStudioStore();
   const { isReviewMode, activeProposalId, proposals } = useWorktree();
-  const { fabricRef, activeTool, setActiveTool, syncCanvasToYjs, undo, redo } = useImageEditor(yImage);
-  
+
+  const { 
+    fabricRef, 
+    activeTool, 
+    syncCanvasToYjs, 
+    pushSnapshot,
+    undo, 
+    redo,
+    canUndo,
+    canRedo
+  } = useImageEditor(yImage);
+
+  const [canvas, setCanvas] = useState<Canvas | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [isSpacePanning, setIsSpacePanning] = useState<boolean>(false);
+  const [isMaskMode, setIsMaskMode] = useState<boolean>(false);
+  const activeToolRef = useRef(activeTool);
+  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
-    brushSize: 5,
+    brushSize: 8,
     brushColor: '#ffffff',
-    eraserSize: 20,
-    fillColor: '#333333',
-    maskColor: 'rgba(255, 0, 0, 0.4)',
+    eraserSize: 24,
+    fillColor: '#4f46e5',
+    maskColor: 'rgba(239, 68, 68, 0.45)',
     strokeColor: '#000000',
     strokeWidth: 2,
     opacity: 1,
     blendMode: 'source-over'
   });
 
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [currentPath, setCurrentPath] = useState<Path | null>(null);
-  const [shapeStart, setShapeStart] = useState<Point | null>(null);
-
-  // Tool handling
-  const handleToolChange = (tool: ToolType) => {
-    setActiveTool(tool);
-  };
-
   const handleSettingsChange = (newSettings: Partial<ToolSettings>) => {
     setToolSettings(prev => ({ ...prev, ...newSettings }));
     
-    if (fabricRef.current && activeTool === ToolType.BRUSH && fabricRef.current.freeDrawingBrush) {
+    if (fabricRef.current && (activeTool === ToolType.BRUSH || isMaskMode) && fabricRef.current.freeDrawingBrush) {
       fabricRef.current.freeDrawingBrush.width = newSettings.brushSize || toolSettings.brushSize;
-      fabricRef.current.freeDrawingBrush.color = newSettings.brushColor || toolSettings.brushColor;
+      fabricRef.current.freeDrawingBrush.color = isMaskMode 
+        ? (newSettings.maskColor || toolSettings.maskColor) 
+        : (newSettings.brushColor || toolSettings.brushColor);
     }
     
     if (fabricRef.current && activeTool === ToolType.ERASER && fabricRef.current.freeDrawingBrush) {
@@ -54,132 +74,245 @@ const ImageEditor: React.FC = () => {
     }
   };
 
-  // Initialize canvas with enhanced settings
+  // Initialize canvas
   useEffect(() => {
     if (!canvasRef.current) return;
     
-    const canvas = new Canvas(canvasRef.current, { 
+    const c = new Canvas(canvasRef.current, { 
       width: 512, 
       height: 512, 
-      backgroundColor: '#000',
+      backgroundColor: '#0a0a0a',
       preserveObjectStacking: true,
       selection: true,
       defaultCursor: 'crosshair',
       hoverCursor: 'crosshair'
     });
     
-    fabricRef.current = canvas;
+    fabricRef.current = c;
+    setCanvas(c);
     
-    // Set up custom brush for smoother drawing
-    const pencilBrush = new PencilBrush(canvas);
-    canvas.freeDrawingBrush = pencilBrush;
-    canvas.isDrawingMode = false;
+    const pencilBrush = new PencilBrush(c);
+    c.freeDrawingBrush = pencilBrush;
+    c.isDrawingMode = false;
     
-    // Enhanced event handling
-    const handleObjectModified = () => {
+    // History & Sync events
+    const handleMutation = () => {
       syncCanvasToYjs();
+      pushSnapshot();
     };
-    
-    const handleObjectAdded = () => {
-      syncCanvasToYjs();
-    };
-    
-    const handleObjectRemoved = () => {
-      syncCanvasToYjs();
-    };
-    
-    const handleSelectionCreated = (e: any) => {
-      const activeObject = e.target;
-      if (activeObject) {
-        const objects = canvas.getObjects();
-        const layerIndex = objects.findIndex(obj => obj === activeObject);
-        setSelectedLayer(layerIndex);
-      }
-    };
-    
-    const handleSelectionUpdated = (e: any) => {
-      const activeObject = e.target;
-      if (activeObject) {
-        const objects = canvas.getObjects();
-        const layerIndex = objects.findIndex(obj => obj === activeObject);
-        setSelectedLayer(layerIndex);
-      }
-    };
-    
-    const handleSelectionCleared = () => {
-      setSelectedLayer(null);
-    };
-    
-    canvas.on('object:modified', handleObjectModified);
-    canvas.on('object:added', handleObjectAdded);
-    canvas.on('object:removed', handleObjectRemoved);
-    canvas.on('selection:created', handleSelectionCreated);
-    canvas.on('selection:updated', handleSelectionUpdated);
-    canvas.on('selection:cleared', handleSelectionCleared);
-    
-    return () => {
-      canvas.dispose();
-    };
-  }, [syncCanvasToYjs, fabricRef]);
 
-  // Handle tool changes
+    const handleSelection = (e: any) => {
+      const activeObject = e.target;
+      if (activeObject) {
+        const objects = c.getObjects();
+        const layerIndex = objects.indexOf(activeObject);
+        setSelectedLayer(layerIndex !== -1 ? layerIndex : null);
+      }
+    };
+    
+    c.on('object:modified', handleMutation);
+    c.on('object:added', handleMutation);
+    c.on('object:removed', handleMutation);
+    c.on('selection:created', handleSelection);
+    c.on('selection:updated', handleSelection);
+    c.on('selection:cleared', () => setSelectedLayer(null));
+
+    // Wheel Zoom centered at cursor
+    c.on('mouse:wheel', (opt: any) => {
+      const delta = opt.e.deltaY;
+      let zoom = c.getZoom() * (0.999 ** delta);
+      zoom = Math.min(Math.max(0.1, zoom), 10);
+      c.zoomToPoint(new Point(opt.e.offsetX, opt.e.offsetY), zoom);
+      setZoomLevel(Math.round(zoom * 100));
+      opt.e.preventDefault();
+      opt.e.stopPropagation();
+    });
+
+    // Panning with drag
+    let isDragging = false;
+    let lastPosX = 0;
+    let lastPosY = 0;
+
+    // Marquee selection dragging
+    let isSelectingMarquee = false;
+    let marqueeRect: fabric.Rect | null = null;
+    let marqueeStartX = 0;
+    let marqueeStartY = 0;
+
+    c.on('mouse:down', (opt: any) => {
+      const evt = opt.e;
+      // Middle click (button === 1) or Spacebar held down
+      if (evt.button === 1 || evt.altKey || isSpacePanning) {
+        isDragging = true;
+        c.selection = false;
+        lastPosX = evt.clientX;
+        lastPosY = evt.clientY;
+        return;
+      }
+
+      if (activeToolRef.current === ToolType.SELECTION && evt.button === 0) {
+        isSelectingMarquee = true;
+        c.selection = false;
+        c.getObjects().filter((o: any) => o.isMarquee).forEach(o => c.remove(o));
+
+        const pointer = c.getPointer(opt.e);
+        marqueeStartX = pointer.x;
+        marqueeStartY = pointer.y;
+
+        marqueeRect = new fabric.Rect({
+          left: marqueeStartX,
+          top: marqueeStartY,
+          width: 0,
+          height: 0,
+          fill: 'rgba(99, 102, 241, 0.15)',
+          stroke: '#6366f1',
+          strokeWidth: 1.5,
+          strokeDashArray: [4, 4],
+          selectable: true,
+          hasRotatingPoint: false,
+        });
+        (marqueeRect as any).isMarquee = true;
+        (marqueeRect as any).layerName = 'Marquee Selection';
+        c.add(marqueeRect);
+        c.renderAll();
+      }
+    });
+
+    c.on('mouse:move', (opt: any) => {
+      if (isDragging) {
+        const evt = opt.e;
+        const vpt = c.viewportTransform;
+        if (vpt) {
+          vpt[4] += evt.clientX - lastPosX;
+          vpt[5] += evt.clientY - lastPosY;
+          c.requestRenderAll();
+        }
+        lastPosX = evt.clientX;
+        lastPosY = evt.clientY;
+        return;
+      }
+
+      if (isSelectingMarquee && marqueeRect) {
+        const pointer = c.getPointer(opt.e);
+        const left = Math.min(marqueeStartX, pointer.x);
+        const top = Math.min(marqueeStartY, pointer.y);
+        const width = Math.abs(pointer.x - marqueeStartX);
+        const height = Math.abs(pointer.y - marqueeStartY);
+        marqueeRect.set({ left, top, width, height });
+        c.renderAll();
+      }
+    });
+
+    c.on('mouse:up', () => {
+      if (isDragging) {
+        isDragging = false;
+        c.selection = activeToolRef.current === ToolType.SELECT;
+      }
+
+      if (isSelectingMarquee) {
+        isSelectingMarquee = false;
+        if (marqueeRect && ((marqueeRect.width || 0) < 5 || (marqueeRect.height || 0) < 5)) {
+          c.remove(marqueeRect);
+          marqueeRect = null;
+        } else if (marqueeRect) {
+          c.setActiveObject(marqueeRect);
+        }
+        c.renderAll();
+      }
+    });
+    
+    // Initial snapshot
+    setTimeout(() => pushSnapshot(), 200);
+
+    return () => {
+      c.dispose();
+    };
+  }, [syncCanvasToYjs, pushSnapshot, fabricRef]);
+
+  // Spacebar panning listener
   useEffect(() => {
-    if (!fabricRef.current) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        setIsSpacePanning(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePanning(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Update canvas tool state
+  useEffect(() => {
+    const c = fabricRef.current;
+    if (!c) return;
     
-    const canvas = fabricRef.current;
-    
+    if (isMaskMode) {
+      c.isDrawingMode = true;
+      if (c.freeDrawingBrush) {
+        c.freeDrawingBrush.width = toolSettings.brushSize;
+        c.freeDrawingBrush.color = toolSettings.maskColor;
+      }
+      return;
+    }
+
     switch (activeTool) {
       case ToolType.BRUSH:
-        canvas.isDrawingMode = true;
-        if (canvas.freeDrawingBrush) {
-          canvas.freeDrawingBrush.width = toolSettings.brushSize;
-          canvas.freeDrawingBrush.color = toolSettings.brushColor;
+        c.isDrawingMode = true;
+        c.selection = false;
+        if (c.freeDrawingBrush) {
+          c.freeDrawingBrush.width = toolSettings.brushSize;
+          c.freeDrawingBrush.color = toolSettings.brushColor;
         }
         break;
         
       case ToolType.ERASER:
-        canvas.isDrawingMode = true;
-        if (canvas.freeDrawingBrush) {
-          canvas.freeDrawingBrush.width = toolSettings.eraserSize;
-          canvas.freeDrawingBrush.color = '#000000';
+        c.isDrawingMode = true;
+        c.selection = false;
+        if (c.freeDrawingBrush) {
+          c.freeDrawingBrush.width = toolSettings.eraserSize;
+          c.freeDrawingBrush.color = '#0a0a0a';
         }
         break;
         
       case ToolType.SELECT:
-        canvas.isDrawingMode = false;
+        c.isDrawingMode = false;
+        c.selection = true;
+        c.defaultCursor = 'default';
+        break;
+        
+      case ToolType.SELECTION:
+        c.isDrawingMode = false;
+        c.selection = false;
+        c.defaultCursor = 'crosshair';
         break;
         
       case ToolType.SHAPE:
-        canvas.isDrawingMode = false;
-        break;
-        
+      case ToolType.TEXT:
+      case ToolType.CROP:
       default:
-        canvas.isDrawingMode = false;
+        c.isDrawingMode = false;
+        c.selection = false;
+        c.defaultCursor = 'crosshair';
+        break;
     }
-  }, [activeTool, toolSettings, fabricRef]);
+  }, [activeTool, toolSettings, isMaskMode, fabricRef]);
 
-  // Tools array
-  const tools = [
-    { id: ToolType.SELECT, icon: MousePointer2, label: 'Select' },
-    { id: ToolType.BRUSH, icon: Brush, label: 'Paint' },
-    { id: ToolType.ERASER, icon: Eraser, label: 'Erase' },
-    { id: ToolType.SHAPE, icon: Square, label: 'Shape' }
-  ];
-
-  // Sync canvas state to Y.js
+  // Synchronize base image and Yjs
   useEffect(() => {
-    if (fabricRef.current && yImage) {
-      const canvasData = JSON.stringify(fabricRef.current.toJSON());
-      yImage.set('canvasData', canvasData);
-    }
-  }, [fabricRef, yImage, selectedLayer]);
-
-  // Handle canvas update from Y.js
-  const handleCanvasUpdate = useCallback(() => {
-    if (!fabricRef.current) return;
+    const c = fabricRef.current;
+    if (!c) return;
     
     const update = () => {
-      let activeImageData = yImage.get('baseImageData');
+      let activeImageData = yImage?.get('baseImageData');
       let isProposalPreview = false;
 
       if (isReviewMode && activeProposalId) {
@@ -190,161 +323,235 @@ const ImageEditor: React.FC = () => {
         }
       }
 
-      const canvasData = yImage.get('canvasData');
-      if (canvasData && fabricRef.current && canvasData !== JSON.stringify(fabricRef.current.toJSON())) {
-        fabricRef.current.loadFromJSON(JSON.parse(canvasData)).then(() => {
-          fabricRef.current?.renderAll();
-        });
-      }
-
-      if (activeImageData && fabricRef.current) {
+      if (activeImageData) {
         FabricImage.fromURL(`data:image/png;base64,${activeImageData}`).then(loaded => {
-          fabricRef.current?.getObjects('image').forEach(o => {
-            fabricRef.current?.remove(o);
-          });
+          c.getObjects('image').forEach(o => c.remove(o));
           loaded.set({ 
             selectable: false, 
             evented: false,
-            opacity: isProposalPreview ? 0.9 : 1.0
+            opacity: isProposalPreview ? 0.85 : 1.0
           });
-          fabricRef.current?.add(loaded);
-          fabricRef.current?.sendObjectToBack(loaded);
-          fabricRef.current?.renderAll();
+          (loaded as any).layerName = 'Base Background';
+          c.add(loaded);
+          c.sendObjectToBack(loaded);
+          c.renderAll();
         });
       }
     };
 
-    yImage.observe(update);
+    yImage?.observe(update);
     if (yExperimental) yExperimental.observe(update);
-    
-    if (fabricRef.current) {
-      fabricRef.current.on('object:added', syncCanvasToYjs);
-      fabricRef.current.on('object:modified', syncCanvasToYjs);
-      fabricRef.current.on('object:removed', syncCanvasToYjs);
-      fabricRef.current.on('path:created', syncCanvasToYjs);
-    }
-    
     update();
 
     return () => { 
-      yImage.unobserve(update); 
+      yImage?.unobserve(update); 
       if (yExperimental) yExperimental.unobserve(update);
     };
-  }, [yImage, yExperimental, isReviewMode, activeProposalId, proposals, syncCanvasToYjs, fabricRef]);
+  }, [yImage, yExperimental, isReviewMode, activeProposalId, proposals, fabricRef]);
 
-  // Handle adjustment application
-  const handleAdjustmentApplied = useCallback(() => {
-    if (fabricRef.current) {
-      syncCanvasToYjs();
-    }
-  }, [syncCanvasToYjs, fabricRef]);
+  // Zoom helpers
+  const handleZoomIn = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    let nextZoom = c.getZoom() * 1.25;
+    nextZoom = Math.min(nextZoom, 10);
+    c.setZoom(nextZoom);
+    setZoomLevel(Math.round(nextZoom * 100));
+    c.renderAll();
+  };
+
+  const handleZoomOut = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    let nextZoom = c.getZoom() / 1.25;
+    nextZoom = Math.max(nextZoom, 0.1);
+    c.setZoom(nextZoom);
+    setZoomLevel(Math.round(nextZoom * 100));
+    c.renderAll();
+  };
+
+  const handleResetZoom = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    c.setZoom(1);
+    c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    setZoomLevel(100);
+    c.renderAll();
+  };
+
+  // Export current canvas or mask
+  const handleExportImage = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const dataURL = c.toDataURL({ format: 'png', quality: 1 });
+    const link = document.createElement('a');
+    link.download = `artifex-export-${Date.now()}.png`;
+    link.href = dataURL;
+    link.click();
+    toast.success('Image exported successfully');
+  };
 
   return (
-    <div className="flex-1 flex bg-studio-bg overflow-hidden">
-      {/* Left Sidebar - Layer Management */}
-      <div className="w-64 min-w-[16rem] border-r border-studio-panel-border bg-studio-panel overflow-y-auto custom-scrollbar">
-        <div className="p-4">
-          <LayerManager 
-            canvas={fabricRef.current || null}
-            onLayerSelect={(layer) => {
-              if (layer) {
-                setSelectedLayer(parseInt(layer.id.replace('layer-', '')));
-              } else {
-                setSelectedLayer(null);
-              }
-            }}
-            selectedTool={activeTool as ToolType}
-            toolSettings={toolSettings}
-          />
-        </div>
-      </div>
-
-      {/* Center - Canvas Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Toolbar */}
-        <div className="h-12 border-b border-studio-panel-bg bg-studio-panel flex-shrink-0">
-          <div className="flex items-center justify-between px-4 h-full">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {tools.map((tool) => (
-                <button
-                  key={tool.id}
-                  onClick={() => setActiveTool(tool.id as any)}
-                  className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${
-                    activeTool === tool.id 
-                      ? 'bg-studio-panel-selected text-white' 
-                      : 'bg-studio-panel-hover hover:bg-studio-panel-selected text-studio-text'
-                  }`}
-                  title={tool.label}
-                >
-                  <tool.icon size={16} />
-                  <span className="text-sm">{tool.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button 
-                onClick={undo}
-                className="p-2 hover:bg-studio-panel-hover rounded-lg"
-                title="Undo"
-              >
-                <Undo2 size={16} />
-              </button>
-              <button 
-                onClick={redo}
-                className="p-2 hover:bg-studio-panel-hover rounded-lg"
-                title="Redo"
-              >
-                <Redo2 size={16} />
-              </button>
-              <button 
-                onClick={() => {
-                  if (fabricRef.current) {
-                    const dataURL = fabricRef.current.toDataURL();
-                    const link = document.createElement('a');
-                    link.download = 'edited-image.png';
-                    link.href = dataURL;
-                    link.click();
-                    toast.success('Image exported');
-                  }
+    <div className="h-full min-h-0 min-w-0 overflow-hidden bg-studio-background">
+      <DockWorkspace
+        storageKey="studio-art-editor-layout:v2"
+        panels={[
+          {
+            id: 'layers',
+            title: 'Layers',
+            icon: Layers,
+            defaultZone: 'left',
+            content: (
+              <LayerManager
+                canvas={canvas}
+                onLayerSelect={layer => {
+                  if (layer) setSelectedLayer(parseInt(layer.id.replace('layer-', ''), 10));
+                  else setSelectedLayer(null);
                 }}
-                className="p-2 hover:bg-studio-panel-hover rounded-lg"
-                title="Export"
-              >
-                <Download size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
+              />
+            ),
+          },
+          {
+            id: 'canvas',
+            title: 'Canvas Workspace',
+            icon: ImageIcon,
+            defaultZone: 'center',
+            content: (
+              <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-studio-background">
+                {/* Canvas Control Toolbar */}
+                <div className="flex h-11 shrink-0 items-center justify-between border-b border-studio-border bg-studio-header px-3">
+                  {/* Left: Undo/Redo & Mask Toggle */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={undo}
+                      disabled={!canUndo}
+                      className="rounded p-1.5 text-studio-text hover:bg-studio-hover disabled:opacity-30 transition-all"
+                      aria-label="Undo"
+                      title="Undo (Ctrl+Z)"
+                    >
+                      <Undo2 size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={redo}
+                      disabled={!canRedo}
+                      className="rounded p-1.5 text-studio-text hover:bg-studio-hover disabled:opacity-30 transition-all"
+                      aria-label="Redo"
+                      title="Redo (Ctrl+Y)"
+                    >
+                      <Redo2 size={15} />
+                    </button>
 
-        {/* Canvas Container */}
-        <div className="flex-1 flex items-center justify-center bg-studio-panel p-4 overflow-hidden">
-          <div className="relative max-w-full max-h-full">
-            <canvas 
-              ref={canvasRef}
-              width={512}
-              height={512}
-              className="max-w-full max-h-full border border-studio-panel-border rounded-lg bg-black"
-              style={{ maxWidth: '100%', maxHeight: '100%' }}
-            />
-            {/* Canvas Info Overlay */}
-            <div className="absolute top-2 left-2 text-xs text-studio-text-dim bg-studio-panel/80 px-2 py-1 rounded">
-              {selectedLayer !== null ? `Layer ${selectedLayer + 1}` : 'No layer selected'}
-            </div>
-          </div>
-        </div>
-      </div>
+                    <div className="w-px h-5 bg-studio-border mx-1" />
 
-      {/* Right Sidebar - Editing Tools */}
-      <div className="w-64 min-w-[16rem] border-l border-studio-panel-border bg-studio-panel overflow-y-auto custom-scrollbar">
-        <div className="p-4">
-          <EditingTools 
-            canvas={fabricRef.current || null}
-            activeTool={activeTool as ToolType}
-            onToolChange={setActiveTool}
-            onSettingsChange={handleSettingsChange}
-          />
-        </div>
-      </div>
+                    {/* Mask Inpaint mode button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !isMaskMode;
+                        setIsMaskMode(next);
+                        if (next) toast('Inpaint Mask Brush active', { icon: '🖌️' });
+                      }}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold transition-all border ${
+                        isMaskMode 
+                          ? 'bg-red-500 text-white border-red-400 shadow-sm' 
+                          : 'bg-black/30 text-studio-text-dim border-studio-border hover:bg-studio-hover hover:text-white'
+                      }`}
+                      title="Paint an inpainting mask for AI generation"
+                    >
+                      <Paintbrush size={13} />
+                      <span>{isMaskMode ? 'Masking ON' : 'Inpaint Mask'}</span>
+                    </button>
+                  </div>
+
+                  {/* Right: Zoom controls & Export */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center bg-black/40 border border-studio-border rounded px-1.5 py-0.5 text-xs text-studio-text font-mono">
+                      <button
+                        type="button"
+                        onClick={handleZoomOut}
+                        className="p-1 hover:text-studio-accent transition-colors"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut size={13} />
+                      </button>
+                      <span className="w-12 text-center text-[11px] font-bold">{zoomLevel}%</span>
+                      <button
+                        type="button"
+                        onClick={handleZoomIn}
+                        className="p-1 hover:text-studio-accent transition-colors"
+                        title="Zoom In"
+                      >
+                        <ZoomIn size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleResetZoom}
+                        className="p-1 text-studio-text-dim hover:text-white transition-colors ml-1"
+                        title="Reset View"
+                      >
+                        <RotateCcw size={12} />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleExportImage}
+                      className="flex items-center gap-1 bg-studio-accent hover:bg-studio-accent/80 text-white font-bold text-xs px-3 py-1.5 rounded transition-all shadow-sm"
+                      aria-label="Export image"
+                      title="Export PNG to disk"
+                    >
+                      <Download size={14} />
+                      <span>Export</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Viewport Canvas Center */}
+                <div 
+                  ref={containerRef}
+                  className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-studio-panel p-4 relative"
+                >
+                  <div className="relative flex max-h-full max-w-full items-center justify-center shadow-2xl">
+                    <canvas
+                      ref={canvasRef}
+                      width={512}
+                      height={512}
+                      className="rounded-lg border border-studio-border bg-black shadow-inner"
+                    />
+
+                    {/* Active Layer Pill */}
+                    <div className="absolute left-3 top-3 pointer-events-none rounded bg-black/70 backdrop-blur-sm px-2.5 py-1 text-[11px] font-medium text-studio-text border border-white/10 shadow-md">
+                      {isMaskMode ? (
+                        <span className="text-red-400 font-bold uppercase">Drawing Inpainting Mask</span>
+                      ) : selectedLayer !== null ? (
+                        `Active: Layer ${selectedLayer + 1}`
+                      ) : (
+                        'No layer selected (Select tool)'
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ),
+          },
+          {
+            id: 'tool-options',
+            title: 'Tool Options & Filters',
+            icon: SlidersHorizontal,
+            defaultZone: 'right',
+            content: (
+              <EditingTools
+                canvas={canvas}
+                activeTool={activeTool as ToolType}
+                toolSettings={toolSettings}
+                onSettingsChange={handleSettingsChange}
+              />
+            ),
+          },
+        ]}
+      />
     </div>
   );
 };

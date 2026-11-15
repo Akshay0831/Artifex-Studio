@@ -7,7 +7,7 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills'
 export default defineConfig({
   plugins: [
     react(),
-    // Add Node.js polyfills to handle externalized modules gracefully
+    // Polyfill Node built-ins imported by browser dependencies.
     nodePolyfills({
       // Whether to polyfill `global`.
       globals: {
@@ -15,8 +15,6 @@ export default defineConfig({
         global: true,
         process: true,
       },
-      // Whether to polyfill specific globals.
-      exclude: ['fs'],
       // Whether to polyfill `node:` protocol imports.
       protocolImports: true,
     }),
@@ -28,36 +26,17 @@ export default defineConfig({
       '@/lib': path.resolve(__dirname, './src/lib'),
       '@/i18n': path.resolve(__dirname, './src/i18n'),
     },
-    // Add externalization for Node.js modules to reduce warnings
-    // These modules don't exist in browser and should be externalized
     extensions: ['.js', '.jsx', '.ts', '.tsx'],
     dedupe: ['react', 'react-dom'],
   },
   build: {
     rollupOptions: {
-      external: [
-        // Externalize Node.js modules to avoid browser compatibility warnings
-        'fs',
-        'path',
-        'crypto',
-        'os',
-        'util',
-        'stream',
-        'perf_hooks',
-        'vm',
-        'assert',
-        'url',
-        'tty',
-        'module',
-        'process',
-        'v8',
-      ],
       output: {
         manualChunks: {
           // Split React and core libraries
           'react-vendor': ['react', 'react-dom', 'react-hot-toast'],
           // Split third-party UI libraries
-          'ui-vendor': ['lucide-react', 'yjs', 'y-websocket', 'tone'],
+          'ui-vendor': ['lucide-react', 'yjs', 'tone'],
           // Split third-party CSS and utilities
           'css-vendor': ['fabric', 'tailwindcss'],
         },

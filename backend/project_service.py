@@ -1,11 +1,15 @@
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from utils.base_service import BaseStudioService
 from utils.telemetry import trace_performance
-from utils.encoding import base64_to_pil
 
 logger = logging.getLogger("studio.backend.project_service")
+
+
+class SceneAnalysisUnavailableError(RuntimeError):
+    pass
+
 
 class ProjectService(BaseStudioService):
     def __init__(self):
@@ -37,24 +41,8 @@ class ProjectService(BaseStudioService):
 
     @trace_performance("analyze_scene")
     async def analyze_scene(self, image_b64: Optional[str] = None, audio_metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Analyzes scene to extract cross-modal metadata."""
-        # Visual analysis (e.g. CLIP integration)
-        metadata = {
-            "mood": "Atmospheric",
-            "dominant_colors": ["#1a1a1a", "#4a4a4a"],
-            "keywords": ["industrial", "dark", "metallic"],
-            "suggested_audio_config": {
-                "mood": "Dark",
-                "composer": "ambient",
-                "bpm": 80
-            }
-        }
-        
-        if image_b64:
-            logger.info("Analyzing visual scene metadata")
-            # Analysis logic here
-            pass
-
-        return metadata
+        raise SceneAnalysisUnavailableError(
+            "Scene analysis is unavailable because no analysis backend is configured."
+        )
 
 project_service = ProjectService()

@@ -73,6 +73,30 @@ def test_project_crud_persists_across_service_instances(tmp_path, monkeypatch):
     ) == {"seed": 9}
 
 
+def test_editor_state_api_persists_per_project_and_enforces_size_limit(
+    tmp_path, monkeypatch
+):
+    service = ProjectAssetService(tmp_path, max_editor_state_bytes=32)
+    monkeypatch.setattr(project_routes, "project_asset_service", service)
+    project = create_project()
+    endpoint = f"/api/projects/{project['id']}/editor-state"
+
+    assert client.get(endpoint).status_code == 204
+    state = b"\x00Yjs editor state"
+    saved = client.put(endpoint, content=state)
+
+    assert saved.status_code == 200
+    assert saved.json() == {"status": "saved", "size_bytes": len(state)}
+    assert client.get(endpoint).content == state
+    assert client.put(endpoint, content=b"").status_code == 422
+    assert client.put(endpoint, content=b"x" * 33).status_code == 413
+    assert client.get(f"/api/projects/{uuid4()}/editor-state").status_code == 404
+
+    restored_service = ProjectAssetService(tmp_path, max_editor_state_bytes=32)
+    monkeypatch.setattr(project_routes, "project_asset_service", restored_service)
+    assert client.get(endpoint).content == state
+
+
 def test_legacy_project_directory_is_migrated(tmp_path):
     legacy_id = str(uuid4())
     legacy_directory = tmp_path / legacy_id
@@ -150,6 +174,62 @@ def test_audio_reference_records_decoded_metadata(tmp_path, monkeypatch):
     assert reference["media_info"]["sample_rate"] == 8000
 
 
+def test_reference_palette_endpoint_returns_limited_colors_and_provenance(
+    tmp_path, monkeypatch
+):
+    service = ProjectAssetService(tmp_path)
+    monkeypatch.setattr(project_routes, "project_asset_service", service)
+    project = create_project()
+    source = Image.new("RGB", (4, 1))
+    source.putdata([(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)])
+    data = io.BytesIO()
+    source.save(data, format="PNG")
+    reference = service.create_reference(
+        project["id"],
+        "palette-source.png",
+        data.getvalue(),
+    )
+
+    response = client.get(
+        f"/api/projects/{project['id']}/references/{reference['id']}/palette",
+        params={"max_colors": 2},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert len(result["colors"]) <= 2
+    assert result["source_reference"] == {
+        "project_id": project["id"],
+        "reference_id": reference["id"],
+        "sha256": reference["sha256"],
+        "original_filename": "palette-source.png",
+    }
+
+
+def test_reference_palette_endpoint_rejects_audio_and_out_of_range_limits(
+    tmp_path, monkeypatch
+):
+    service = ProjectAssetService(tmp_path)
+    monkeypatch.setattr(project_routes, "project_asset_service", service)
+    project = create_project()
+    audio_reference = service.create_reference(
+        project["id"],
+        "sample.wav",
+        audio_bytes(),
+    )
+
+    audio_response = client.get(
+        f"/api/projects/{project['id']}/references/{audio_reference['id']}/palette"
+    )
+    invalid_limit = client.get(
+        f"/api/projects/{project['id']}/references/{audio_reference['id']}/palette",
+        params={"max_colors": 257},
+    )
+
+    assert audio_response.status_code == 415
+    assert invalid_limit.status_code == 422
+
+
 def test_reference_upload_rejects_unsupported_and_oversized_content(tmp_path, monkeypatch):
     service = ProjectAssetService(tmp_path, max_upload_bytes=32)
     monkeypatch.setattr(project_routes, "project_asset_service", service)
@@ -184,6 +264,8 @@ def test_project_bundle_round_trip_preserves_metadata_and_original_reference(tmp
         role="palette",
         source="artist-provided",
     )
+    editor_state = b"\x00Yjs project state"
+    service.save_editor_state(project["id"], editor_state)
 
     bundle = service.export_project_bundle(project["id"])
     restored_service = ProjectAssetService(tmp_path / "restored")
@@ -195,11 +277,50 @@ def test_project_bundle_round_trip_preserves_metadata_and_original_reference(tmp
     assert restored["description"] == project["description"]
     assert restored["tags"] == project["tags"]
     assert restored["config"] == project["config"]
+    assert restored_service.get_editor_state(restored["id"]) == editor_state
     assert restored_reference["id"] != reference["id"]
     assert restored_reference["sha256"] == reference["sha256"]
     assert restored_service.reference_content_path(
         restored["id"], restored_reference["id"]
     ).read_bytes() == original
+
+
+def test_project_bundle_imports_legacy_v1_without_editor_state(tmp_path):
+    manifest = {
+        "format_version": 1,
+        "project": {"name": "Legacy bundle", "description": "", "tags": [], "config": {}},
+        "references": [],
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+
+    service = ProjectAssetService(tmp_path)
+    imported = service.import_project_bundle(buffer.getvalue())
+
+    assert imported["name"] == "Legacy bundle"
+    assert service.get_editor_state(imported["id"]) is None
+
+
+def test_project_bundle_rejects_changed_editor_state_bytes(tmp_path):
+    source = ProjectAssetService(tmp_path / "source")
+    project = source.create_project("State integrity", "", [], {})
+    source.save_editor_state(project["id"], b"\x00Yjs state")
+    exported = source.export_project_bundle(project["id"])
+    tampered = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(exported), "r") as original:
+        with zipfile.ZipFile(tampered, "w") as modified:
+            for entry in original.infolist():
+                contents = original.read(entry.filename)
+                if entry.filename == "editor-state.yjs":
+                    contents = contents[:-1] + bytes([contents[-1] ^ 1])
+                modified.writestr(entry.filename, contents)
+
+    destination = ProjectAssetService(tmp_path / "destination")
+    with pytest.raises(ValueError, match="Editor-state checksum"):
+        destination.import_project_bundle(tampered.getvalue())
+
+    assert destination.list_projects() == []
 
 
 def test_project_bundle_rejects_unsafe_paths_before_creating_a_project(tmp_path):

@@ -1,3 +1,4 @@
+import importlib.util
 import runpy
 from pathlib import Path
 from unittest.mock import patch
@@ -95,6 +96,20 @@ def test_health_reports_the_application_version():
 
     assert response.status_code == 200
     assert response.json()["version"] == app.version
+    assert response.json()["websocket_available"] is any(
+        importlib.util.find_spec(module) is not None
+        for module in ("websockets", "wsproto")
+    )
+
+
+def test_websocket_endpoint_accepts_generation_transport():
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json({"type": "unsupported_smoke_test_action"})
+            response = websocket.receive_json()
+
+    assert response["type"] == "error"
+    assert response["operation"] == "unsupported_smoke_test_action"
 
 
 def test_release_asset_size_must_be_below_github_limit():

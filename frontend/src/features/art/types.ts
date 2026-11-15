@@ -35,6 +35,10 @@ export interface ToolSettings {
   strokeWidth: number;
   opacity: number;
   blendMode: GlobalCompositeOperation;
+  fontSize?: number;
+  fontFamily?: string;
+  shapeType?: ShapeType;
+  maskActive?: boolean;
 }
 
 // Layer interface

@@ -11,6 +11,7 @@ export const useArtGeneration = () => {
   const [variationSettings, setVariationSettings] = useState<ImagePaletteSettings[]>([]);
 
   const [progress, setProgress] = useState(0);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   const generate = useCallback((
     prompt: string,
@@ -22,6 +23,7 @@ export const useArtGeneration = () => {
   ) => {
     setIsGenerating(true);
     setProgress(0);
+    setGenerationError(null);
     setVariations(new Array(count).fill(''));
     setVariationSettings(new Array(count).fill(palette));
 
@@ -33,6 +35,7 @@ export const useArtGeneration = () => {
       'paletteColors',
       'paletteDither',
       'palettePreserveAlpha',
+      'paletteSourceReference',
     ]);
     if (yPrompt) {
       yPrompt.forEach((val, key) => {
@@ -43,14 +46,22 @@ export const useArtGeneration = () => {
     }
     config.palette = palette;
 
-    sendMessage({
-      type: 'generate_image',
-      prompt,
-      seed,
-      num_variations: count,
-      config,
-      worktree: worktree // Pass target worktree context
-    });
+    try {
+      sendMessage({
+        type: 'generate_image',
+        prompt,
+        seed,
+        num_variations: count,
+        config,
+        worktree
+      });
+    } catch (error) {
+      setIsGenerating(false);
+      setProgress(0);
+      setGenerationError(
+        error instanceof Error ? error.message : 'Could not start image generation.',
+      );
+    }
   }, [sendMessage, model, yPrompt]);
 
   // Update variations and progress when chunks or complete results arrive
@@ -67,8 +78,15 @@ export const useArtGeneration = () => {
       }
     } else if (lastMessage.type === 'generation_complete') {
       const idx = lastMessage.variation_index ?? 0;
+      const imageBase64 = lastMessage.result?.image_base64;
+      if (typeof imageBase64 !== 'string' || !imageBase64) {
+        setIsGenerating(false);
+        setProgress(0);
+        setGenerationError('The image service returned no image data.');
+        return;
+      }
       const newVars = [...variations];
-      newVars[idx] = lastMessage.result.image_base64;
+      newVars[idx] = imageBase64;
       setVariations(newVars);
       
       // If it was a single image or all variations are done, stop loading
@@ -76,20 +94,26 @@ export const useArtGeneration = () => {
         setIsGenerating(false);
         setProgress(100);
       }
-    } else if (lastMessage.type === 'error') {
+    } else if (lastMessage.type === 'error' && lastMessage.operation === 'generate_image') {
       setIsGenerating(false);
       setProgress(0);
+      setGenerationError(
+        typeof lastMessage.message === 'string'
+          ? lastMessage.message
+          : 'Image generation failed.',
+      );
     }
   }, [lastMessage, variations, numVariations]);
 
   const cancel = useCallback(() => {
-    sendMessage({ type: 'cancel_operation' });
     setIsGenerating(false);
-  }, [sendMessage]);
+    setGenerationError('Generation cannot be cancelled yet; the server may continue processing.');
+  }, []);
 
   return {
     isGenerating,
     progress,
+    generationError,
     variations,
     variationSettings,
     generate,

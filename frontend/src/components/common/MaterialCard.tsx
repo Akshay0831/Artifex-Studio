@@ -1,5 +1,5 @@
 import React from 'react'
-import { useDensity } from '../../core/ThemeConfigContext'
+import { SPACING_MULTIPLIERS, useDensity, useThemeConfig } from '../../core/ThemeConfigContext'
 import { cn } from '../../utils/cn'
 
 export interface MaterialCardProps {
@@ -27,13 +27,13 @@ const elevationStyles = {
   24: 'shadow-[0_24px_48px-4px_rgba(0,0,0,0.14)]'
 }
 
-const paddingStyles = {
-  none: '',
-  xs: 'p-2',
-  sm: 'p-3',
-  md: 'p-4',
-  lg: 'p-6',
-  xl: 'p-8'
+const paddingValues = {
+  none: 0,
+  xs: 0.5,
+  sm: 0.75,
+  md: 1,
+  lg: 1.5,
+  xl: 2
 }
 
 const roundedStyles = {
@@ -58,6 +58,7 @@ export const MaterialCard: React.FC<MaterialCardProps> = ({
   ...props
 }) => {
   const { scale } = useDensity()
+  const { theme } = useThemeConfig()
 
   const variantStyles = {
     elevated: 'bg-studio-panel border border-studio-border',
@@ -75,17 +76,13 @@ export const MaterialCard: React.FC<MaterialCardProps> = ({
         'relative overflow-hidden',
         variantStyles[variant],
         elevationStyles[elevation],
-        paddingStyles[padding],
         roundedStyles[rounded],
         hoverEffect,
         clickableEffect,
         clickAnimation,
         className
       )}
-      style={{
-        transform: `scale(${scale})`,
-        transformOrigin: 'center'
-      }}
+      style={{ padding: `${paddingValues[padding] * scale * SPACING_MULTIPLIERS[theme.spacing]}rem` }}
       onClick={clickable ? onClick : undefined}
       {...props}
     >

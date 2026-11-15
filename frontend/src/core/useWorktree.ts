@@ -8,8 +8,7 @@ export const useWorktree = () => {
     yImage, 
     yAudio, 
     yExperimental, 
-    yReviewMode, 
-    sendMessage 
+    yReviewMode
   } = useStudioStore();
 
   const isReviewMode = yReviewMode.get('active') as boolean;
@@ -50,12 +49,7 @@ export const useWorktree = () => {
       proposals.delete(proposalId);
       endReview();
     });
-
-    sendMessage({
-      type: 'commit_proposal',
-      proposal_id: proposalId
-    });
-  }, [yDoc, yImage, yAudio, yExperimental, endReview, sendMessage]);
+  }, [yDoc, yImage, yAudio, yExperimental, endReview]);
 
   const discardProposal = useCallback((proposalId: string) => {
     const proposals = yExperimental.get('proposals') as any;
@@ -64,12 +58,7 @@ export const useWorktree = () => {
       proposals.delete(proposalId);
       endReview();
     });
-
-    sendMessage({
-      type: 'discard_proposal',
-      proposal_id: proposalId
-    });
-  }, [yDoc, yExperimental, endReview, sendMessage]);
+  }, [yDoc, yExperimental, endReview]);
 
   return {
     isReviewMode,
