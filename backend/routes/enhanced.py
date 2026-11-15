@@ -1,15 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import json
-import os
 import time
 from pathlib import Path
 from config.config import Settings
 settings = Settings()
-from project_service import project_service
-from art_service import art_service
-from audio_service import audio_service
 from utils.monitoring import health_monitor, REQUESTS_CACHE
 from utils.gpu import get_vram_info
 import uuid
@@ -21,7 +17,7 @@ router = APIRouter(prefix="/enhanced", tags=["enhanced"])
 # Request/Response Models
 class ProjectRequest(BaseModel):
     name: str
-    description: Optional[str] = ""
+    description: str = ""
     tags: List[str] = []
     config: Dict[str, Any] = {}
 
@@ -143,8 +139,6 @@ async def export_project(
         
         # Get all generated assets for this project
         project_dir = Path(settings.PROJECTS_PATH) / project_id
-        export_path = Path(settings.OUTPUT_PATH) / "exports" / f"{project_id}_export_{timestamp}"
-        
         if export_request.format.lower() == "zip":
             # Create ZIP archive
             zip_buffer = io.BytesIO()
@@ -155,8 +149,8 @@ async def export_project(
             
             # Add metadata
             metadata = {
-                "project": project.dict(),
-                "export_config": export_request.dict(),
+                "project": project.model_dump(),
+                "export_config": export_request.model_dump(),
                 "timestamp": timestamp,
                 "format": "zip"
             }

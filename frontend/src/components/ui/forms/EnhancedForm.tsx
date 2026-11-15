@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '../../../lib/utils';
+import type { FormState } from './useForm';
 
 export interface FormField {
   name: string;
@@ -19,10 +20,6 @@ export interface FormField {
   placeholder?: string;
   description?: string;
   error?: string;
-}
-
-interface FormState {
-  [key: string]: any;
 }
 
 interface FormErrors {
@@ -60,6 +57,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isBusy = loading || isSubmitting;
 
   // Initialize form data
   useEffect(() => {
@@ -255,7 +253,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
                 value={formData[field.name] || ''}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 onBlur={() => handleBlur(field.name)}
-                disabled={disabled || isSubmitting}
+                disabled={disabled || isBusy}
                 className={cn(
                   'w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
                   getFieldError(field.name) 
@@ -278,7 +276,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
                 value={formData[field.name] || ''}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 onBlur={() => handleBlur(field.name)}
-                disabled={disabled || isSubmitting}
+                disabled={disabled || isBusy}
                 placeholder={field.placeholder}
                 rows={4}
                 className={cn(
@@ -297,7 +295,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
                   id={field.name}
                   checked={formData[field.name] || false}
                   onChange={(e) => handleInputChange(field.name, e.target.checked)}
-                  disabled={disabled || isSubmitting}
+                  disabled={disabled || isBusy}
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
                 <label htmlFor={field.name} className="ml-2 text-sm text-gray-700 dark:text-studio-text">
@@ -317,7 +315,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
                       value={option.value}
                       checked={formData[field.name] === option.value}
                       onChange={(e) => handleInputChange(field.name, e.target.value)}
-                      disabled={disabled || isSubmitting}
+                      disabled={disabled || isBusy}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
                     />
                     <label htmlFor={`${field.name}-${option.value}`} className="ml-2 text-sm text-gray-700 dark:text-studio-text">
@@ -335,7 +333,7 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
                 value={formData[field.name] || ''}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 onBlur={() => handleBlur(field.name)}
-                disabled={disabled || isSubmitting}
+                disabled={disabled || isBusy}
                 placeholder={field.placeholder}
                 className={cn(
                   'w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
@@ -394,85 +392,12 @@ export const EnhancedForm: React.FC<EnhancedFormProps> = ({
 
         <button
           type="submit"
-          disabled={disabled || isSubmitting || totalErrors > 0}
+          disabled={disabled || isBusy || totalErrors > 0}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isSubmitting ? 'Submitting...' : submitButtonText}
+          {isBusy ? 'Submitting...' : submitButtonText}
         </button>
       </div>
     </form>
   );
-};
-
-// Hook for form management
-export const useForm = <T extends FormState>(
-  initialValues: T,
-  validationRules?: { [K in keyof T]?: (value: T[K]) => string | undefined }
-) => {
-  const [values, setValues] = useState<T>(initialValues);
-  const [errors, setErrors] = useState<{ [K in keyof T]?: string }>({});
-  const [touched, setTouched] = useState<Set<keyof T>>(new Set());
-
-  const setValue = useCallback((name: keyof T, value: T[keyof T]) => {
-    setValues(prev => ({ ...prev, [name]: value }));
-    setTouched(prev => new Set([...prev, name]));
-  }, []);
-
-  const setError = useCallback((name: keyof T, error: string) => {
-    setErrors(prev => ({ ...prev, [name]: error }));
-  }, []);
-
-  const clearError = useCallback((name: keyof T) => {
-    setErrors(prev => {
-      const newErrors = { ...prev };
-      delete newErrors[name];
-      return newErrors;
-    });
-  }, []);
-
-  const validate = useCallback(() => {
-    const newErrors: { [K in keyof T]?: string } = {};
-    let isValid = true;
-
-    (Object.keys(values) as Array<keyof T>).forEach(key => {
-      const rule = validationRules?.[key];
-      if (rule) {
-        const error = rule(values[key]);
-        if (error) {
-          newErrors[key] = error;
-          isValid = false;
-        }
-      }
-    });
-
-    setErrors(newErrors);
-    return isValid;
-  }, [values, validationRules]);
-
-  const reset = useCallback(() => {
-    setValues(initialValues);
-    setErrors({});
-    setTouched(new Set());
-  }, [initialValues]);
-
-  const isDirty = useMemo(() => {
-    return (Object.keys(values) as Array<keyof T>).some(key => values[key] !== initialValues[key]);
-  }, [values, initialValues]);
-
-  const isValid = useMemo(() => {
-    return Object.keys(errors).length === 0;
-  }, [errors]);
-
-  return {
-    values,
-    errors,
-    touched,
-    setValue,
-    setError,
-    clearError,
-    validate,
-    reset,
-    isDirty,
-    isValid
-  };
 };

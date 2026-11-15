@@ -1,7 +1,18 @@
+from typing import Any
+
+from fastapi import WebSocket
 import pytest
 
 import extensions.project_extension as project_extension
 from project_service import SceneAnalysisUnavailableError, project_service
+
+
+class FakeWebSocket(WebSocket):
+    def __init__(self) -> None:
+        self.messages: list[Any] = []
+
+    async def send_json(self, data: Any, mode: str = "text") -> None:
+        self.messages.append(data)
 
 
 @pytest.mark.asyncio
@@ -16,13 +27,6 @@ async def test_scene_analysis_websocket_reports_unavailable_without_success(monk
         raise SceneAnalysisUnavailableError("Scene analysis is unavailable.")
 
     monkeypatch.setattr(project_extension.project_service, "analyze_scene", unavailable_analysis)
-
-    class FakeWebSocket:
-        def __init__(self):
-            self.messages = []
-
-        async def send_json(self, message):
-            self.messages.append(message)
 
     websocket = FakeWebSocket()
     await project_extension.handle_analyze_scene(

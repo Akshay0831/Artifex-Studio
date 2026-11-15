@@ -88,6 +88,23 @@ MANIFEST_TOOLS: List[ToolDefinition] = [
             }
         },
         requires_review=True
+    ),
+    ToolDefinition(
+        name="audio.reconstruct",
+        extension_id="audio",
+        description="Reconstructs or generates full song arrangements (Intro, Verse, Chorus, Outro) across all layer stems from prompt instructions.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "Musical description of the song genre, instruments, and structure"},
+                "bpm": {"type": "integer", "default": 120},
+                "key": {"type": "string", "default": "D"},
+                "scale": {"type": "string", "default": "Minor"},
+                "style": {"type": "string", "default": "synthwave"}
+            },
+            "required": ["description"]
+        },
+        requires_review=True
     )
 ]
 
@@ -126,6 +143,20 @@ async def execute_tool_call(request: ToolCallRequest) -> ToolCallResponse:
             args = request.arguments
             res = await audio_service.compose(
                 audio_config=args,
+                seed=args.get("seed", 42)
+            )
+            return ToolCallResponse(tool_name=request.tool_name, status="success", result=res)
+
+        elif request.tool_name == "audio.reconstruct":
+            args = request.arguments
+            res = await audio_service.compose(
+                audio_config={
+                    "bpm": args.get("bpm", 120),
+                    "key": args.get("key", "D"),
+                    "scale": args.get("scale", "Minor"),
+                    "mood": args.get("style", "synthwave"),
+                    "description": args.get("description", "")
+                },
                 seed=args.get("seed", 42)
             )
             return ToolCallResponse(tool_name=request.tool_name, status="success", result=res)

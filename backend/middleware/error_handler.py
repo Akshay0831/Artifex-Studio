@@ -1,10 +1,12 @@
 # Phase 2: Production Polish - Error Handling Middleware
 
 import logging
+import time
 import traceback
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 import asyncio
 
@@ -15,23 +17,21 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     
     def __init__(self, app, max_retries: int = 3):
         super().__init__(app)
+        if max_retries < 1:
+            raise ValueError("max_retries must be at least 1")
         self.max_retries = max_retries
     
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next) -> Response:
         """Process each request with error handling"""
         try:
-            # Add retry logic for transient errors
-            response = None
             for attempt in range(self.max_retries):
                 try:
-                    response = await call_next(request)
-                    break
-                except (ConnectionError, TimeoutError) as e:
+                    return await call_next(request)
+                except (ConnectionError, TimeoutError):
                     if attempt == self.max_retries - 1:
                         raise
                     await asyncio.sleep(2 ** attempt)
-            
-            return response
+            raise RuntimeError("Request retry loop ended without a response")
             
         except HTTPException as e:
             # Already processed HTTP exception
@@ -50,7 +50,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                     "error": "Internal server error",
                     "type": "internal_error",
                     "detail": str(e),
-                    "timestamp": __import__('datetime').datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             )
 
@@ -58,7 +58,6 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
     """Middleware to log all requests for monitoring"""
     
     async def dispatch(self, request: Request, call_next):
-        import time
         from uuid import uuid4
         
         request_id = str(uuid4())
@@ -68,7 +67,13 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
         
         # Log request
         logger.info(f"[{request_id}] {request.method} {request.url.path}")
-        logger.debug(f"[{request_id}] Headers: {dict(request.headers)}")
+        safe_headers = {
+            name: "[REDACTED]" if name.lower() in {
+                "authorization", "cookie", "set-cookie", "x-api-key"
+            } else value
+            for name, value in request.headers.items()
+        }
+        logger.debug(f"[{request_id}] Headers: {safe_headers}")
         logger.debug(f"[{request_id}] Query: {dict(request.query_params)}")
         
         try:
@@ -83,7 +88,7 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
             
             return response
             
-        except Exception as e:
+        except Exception:
             duration = time.time() - start_time
             logger.error(f"[{request_id}] {request.method} {request.url.path} - ERROR ({duration:.2f}s)")
             raise
@@ -105,7 +110,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._last_reset = current_time
         
         # Get client IP
-        client_ip = request.client.host
+        client = request.client
+        if client is None:
+            return await call_next(request)
+        client_ip = client.host
         
         # Increment counter
         self._request_count[client_ip] = self._request_count.get(client_ip, 0) + 1

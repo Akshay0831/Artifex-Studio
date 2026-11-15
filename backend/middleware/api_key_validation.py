@@ -1,8 +1,6 @@
-import asyncio
 import logging
-import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Callable
+from typing import Any, Dict, List, Optional, Callable
 from fastapi import Request, HTTPException, status
 
 logger = logging.getLogger("studio.backend.api_key_validation")
@@ -11,14 +9,14 @@ class APIKey:
     """Represents a valid API key with metadata."""
     
     def __init__(self, key: str, name: str, is_active: bool = True,
-                 rate_limit: Optional[int] = None, scopes: List[str] = None):
+                 rate_limit: Optional[int] = None, scopes: Optional[List[str]] = None):
         self.key = key
         self.name = name
         self.is_active = is_active
         self.rate_limit = rate_limit or 100
         self.scopes = scopes or []
         self.created_at = datetime.now()
-        self.last_used = None
+        self.last_used: Optional[datetime] = None
         self.usage_count = 0
 
 class APIKeyManager:
@@ -26,12 +24,12 @@ class APIKeyManager:
     
     def __init__(self):
         self.valid_keys: Dict[str, APIKey] = {}
-        self.rate_limits: Dict[str, Dict[str, datetime]] = {}
+        self.rate_limits: Dict[str, Dict[datetime, datetime]] = {}
         self.scope_checkers: Dict[str, Callable[[str], bool]] = {}
         
     def register_key(self, key: str, name: str = "API Key",
                      is_active: bool = True, rate_limit: Optional[int] = None,
-                     scopes: List[str] = None):
+                     scopes: Optional[List[str]] = None):
         self.valid_keys[key] = APIKey(key, name, is_active, rate_limit, scopes)
         logger.info(f"Registered API key: {name}")
         
@@ -117,7 +115,7 @@ class APIKeyMiddleware:
     """Middleware for validating API keys."""
     
     def __init__(self, app, api_key_manager: APIKeyManager,
-                 exclude_paths: List[str] = None):
+                 exclude_paths: Optional[List[str]] = None):
         self.app = app
         self.api_key_manager = api_key_manager
         self.exclude_paths = exclude_paths or [
@@ -161,7 +159,7 @@ class APIKeyMiddleware:
         
         return await call_next(request)
 
-def create_api_key_manager(keys: List[str] = None) -> APIKeyManager:
+def create_api_key_manager(keys: Optional[List[str]] = None) -> APIKeyManager:
     manager = APIKeyManager()
     
     default_keys = keys or [
@@ -183,7 +181,7 @@ def create_api_key_manager(keys: List[str] = None) -> APIKeyManager:
     return manager
 
 def add_api_key_middleware(app, api_key_manager: Optional[APIKeyManager] = None,
-                          exclude_paths: List[str] = None):
+                          exclude_paths: Optional[List[str]] = None):
     if api_key_manager is None:
         api_key_manager = create_api_key_manager()
     

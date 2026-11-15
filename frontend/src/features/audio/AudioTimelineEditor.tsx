@@ -1,21 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Play, 
   Pause, 
   Square, 
   Scissors, 
   Copy, 
-  RotateCcw, 
-  Clock,
   Volume2,
-  Settings2,
   Layers,
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { useStudioStore } from '../../core/useStudioStore';
-import { useAudioComposition } from '../../hooks/useAudioComposition';
-import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 
 interface AudioClip {
   id: string;
@@ -41,10 +35,6 @@ interface AudioTrack {
 }
 
 const AudioTimelineEditor: React.FC = () => {
-  const { yAudio } = useStudioStore();
-  const { isComposing, composingLayerIndex, compose } = useAudioComposition();
-  const { togglePlay, stop, isPlaying } = useAudioPlayback();
-  
   const [tracks, setTracks] = useState<AudioTrack[]>([
     {
       id: 'track1',
@@ -90,8 +80,6 @@ const AudioTimelineEditor: React.FC = () => {
   const [bpm, setBpm] = useState(120);
   const [timeSignature, setTimeSignature] = useState({ numerator: 4, denominator: 4 });
   const [isPlayingTimeline, setIsPlayingTimeline] = useState(false);
-
-  const timelineRef = useRef<HTMLDivElement>(null);
 
   // Timeline playback
   useEffect(() => {
@@ -223,7 +211,7 @@ const AudioTimelineEditor: React.FC = () => {
     const totalDuration = 32;
     const width = totalDuration * pixelsPerSecond;
     
-    return tracks.map((track, trackIndex) => (
+    return tracks.map(track => (
       <div key={track.id} className="flex border-b border-studio-border">
         {/* Track Header */}
         <div className="w-48 bg-studio-panel-darker border-r border-studio-border p-2">

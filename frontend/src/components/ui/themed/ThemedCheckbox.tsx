@@ -1,6 +1,5 @@
 import React, { forwardRef } from 'react';
 import { cn } from '../../../lib/utils';
-import { useTheme } from '../../../core/ThemeContext';
 
 export interface ThemedCheckboxProps {
   checked?: boolean;
@@ -20,7 +19,6 @@ export const ThemedCheckbox = forwardRef<HTMLInputElement, ThemedCheckboxProps>(
   label,
   ...props 
 }, ref) => {
-  const { isDark } = useTheme();
   
   return (
     <div className="flex items-center gap-2">

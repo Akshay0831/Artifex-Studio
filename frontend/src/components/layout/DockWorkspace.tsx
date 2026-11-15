@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import { TruncatedText } from '../common/TruncatedText'
 import { ResizableDivider } from '../common/ResizableDivider'
@@ -23,12 +23,16 @@ interface DockLayout {
 interface DockWorkspaceProps {
   panels: DockWorkspacePanel[]
   storageKey?: string
+  collapsedByDefault?: DockZone[]
+  minCenterWidth?: number
 }
 
 const ZONES: DockZone[] = ['left', 'center', 'right']
 const DEFAULT_STORAGE_KEY = 'studio-dock-layout:v1'
+const DEFAULT_LEFT_WIDTH = 320
+const DEFAULT_RIGHT_WIDTH = 280
 
-function createDefaultLayout(panels: DockWorkspacePanel[]): DockLayout {
+function createDefaultLayout(panels: DockWorkspacePanel[], collapsedByDefault: DockZone[] = []): DockLayout {
   const zones: DockLayout['zones'] = { left: [], center: [], right: [] }
   panels.forEach(panel => zones[panel.defaultZone].push(panel.id))
   return {
@@ -38,12 +42,20 @@ function createDefaultLayout(panels: DockWorkspacePanel[]): DockLayout {
       center: zones.center[0] || '',
       right: zones.right[0] || '',
     },
-    collapsed: { left: false, center: false, right: false },
+    collapsed: {
+      left: collapsedByDefault.includes('left'),
+      center: collapsedByDefault.includes('center'),
+      right: collapsedByDefault.includes('right'),
+    },
   }
 }
 
-function readLayout(storageKey: string, panels: DockWorkspacePanel[]): DockLayout {
-  const defaults = createDefaultLayout(panels)
+function readLayout(
+  storageKey: string,
+  panels: DockWorkspacePanel[],
+  collapsedByDefault: DockZone[],
+): DockLayout {
+  const defaults = createDefaultLayout(panels, collapsedByDefault)
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) || 'null')
     if (typeof parsed !== 'object' || parsed === null) return defaults
@@ -83,10 +95,33 @@ function readLayout(storageKey: string, panels: DockWorkspacePanel[]): DockLayou
   }
 }
 
-export function DockWorkspace({ panels, storageKey = DEFAULT_STORAGE_KEY }: DockWorkspaceProps) {
-  const [layout, setLayout] = useState(() => readLayout(storageKey, panels))
-  const [leftWidth, resizeLeft] = usePersistentPanelWidth('studio-dock-left-width', 320, 200, 520)
-  const [rightWidth, resizeRight] = usePersistentPanelWidth('studio-dock-right-width', 280, 200, 520)
+export function DockWorkspace({
+  panels,
+  storageKey = DEFAULT_STORAGE_KEY,
+  collapsedByDefault = [],
+  minCenterWidth = 240,
+}: DockWorkspaceProps) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const [layout, setLayout] = useState(() => readLayout(storageKey, panels, collapsedByDefault))
+  const [workspaceWidth, setWorkspaceWidth] = useState(0)
+  const [leftWidth, resizeLeft] = usePersistentPanelWidth(`${storageKey}:left-width`, DEFAULT_LEFT_WIDTH, 80, 520)
+  const [rightWidth, resizeRight] = usePersistentPanelWidth(`${storageKey}:right-width`, DEFAULT_RIGHT_WIDTH, 80, 520)
+
+  useEffect(() => {
+    const element = workspaceRef.current
+    if (!element) return
+
+    const measure = () => setWorkspaceWidth(Math.round(element.getBoundingClientRect().width))
+    measure()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     try {
@@ -151,9 +186,20 @@ export function DockWorkspace({ panels, storageKey = DEFAULT_STORAGE_KEY }: Dock
     if (targetZone) movePanel(panelId, targetZone)
   }
 
-  const resetLayout = () => setLayout(createDefaultLayout(panels))
-  const leftTrack = layout.collapsed.left ? 48 : leftWidth
-  const rightTrack = layout.collapsed.right ? 48 : rightWidth
+  const resetLayout = () => {
+    setLayout(createDefaultLayout(panels, collapsedByDefault))
+    resizeLeft(DEFAULT_LEFT_WIDTH)
+    resizeRight(DEFAULT_RIGHT_WIDTH)
+  }
+  const centerMinimum = layout.collapsed.center ? 48 : minCenterWidth
+  const collapsedSideWidth = (layout.collapsed.left ? 48 : 0) + (layout.collapsed.right ? 48 : 0)
+  const openSideCount = Number(!layout.collapsed.left) + Number(!layout.collapsed.right)
+  const sideWidthLimit = openSideCount > 0
+    ? Math.max(0, (workspaceWidth - centerMinimum - collapsedSideWidth - 16) / openSideCount)
+    : 0
+  const leftTrack = layout.collapsed.left ? 48 : Math.min(leftWidth, sideWidthLimit)
+  const rightTrack = layout.collapsed.right ? 48 : Math.min(rightWidth, sideWidthLimit)
+  const resizeLimit = Math.min(520, sideWidthLimit)
   const centerTrack = layout.collapsed.center ? '48px' : 'minmax(0, 1fr)'
   const gridTemplateColumns = `${leftTrack}px ${centerTrack} ${rightTrack}px`
 
@@ -256,6 +302,7 @@ export function DockWorkspace({ panels, storageKey = DEFAULT_STORAGE_KEY }: Dock
 
   return (
     <div
+      ref={workspaceRef}
       className="relative grid min-h-0 min-w-0 flex-1 overflow-hidden bg-studio-background"
       style={{
         gridTemplateColumns,
@@ -295,31 +342,31 @@ export function DockWorkspace({ panels, storageKey = DEFAULT_STORAGE_KEY }: Dock
           <span>Drop a panel in this area</span>
         </div>
       )}
-      {!layout.collapsed.left && (
+      {!layout.collapsed.left && resizeLimit >= 80 && (
         <div
           className="pointer-events-none relative z-20"
           style={{ gridColumn: 1, gridRow: '1 / 3' }}
         >
           <ResizableDivider
             label="Resize left dock"
-            size={leftWidth}
-            minSize={200}
-            maxSize={520}
+            size={leftTrack}
+            minSize={80}
+            maxSize={resizeLimit}
             side="right"
             onResize={resizeLeft}
           />
         </div>
       )}
-      {!layout.collapsed.right && (
+      {!layout.collapsed.right && resizeLimit >= 80 && (
         <div
           className="pointer-events-none relative z-20"
           style={{ gridColumn: 3, gridRow: '1 / 3' }}
         >
           <ResizableDivider
             label="Resize right dock"
-            size={rightWidth}
-            minSize={200}
-            maxSize={520}
+            size={rightTrack}
+            minSize={80}
+            maxSize={resizeLimit}
             side="left"
             onResize={resizeRight}
           />

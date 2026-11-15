@@ -56,6 +56,8 @@ const BackupManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedBackup, setSelectedBackup] = useState<Backup | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const fetchData = async () => {
@@ -156,6 +158,35 @@ const BackupManager: React.FC = () => {
     } catch (error) {
       console.error('Failed to download backup:', error);
       return false;
+    }
+  };
+
+  const restoreBackup = async (backup: Backup) => {
+    setIsRestoring(true);
+    setRestoreError(null);
+    try {
+      const response = await fetch(`/api/backup/restore/${backup.backup_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const result = await response.json() as {
+        success?: boolean;
+        error?: string;
+        detail?: string;
+      };
+
+      if (!response.ok || !result.success) {
+        setRestoreError(result.detail || result.error || 'Failed to restore backup.');
+        return;
+      }
+
+      setSelectedBackup(null);
+      await fetchData();
+    } catch (error) {
+      setRestoreError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -336,7 +367,10 @@ const BackupManager: React.FC = () => {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setSelectedBackup(backup)}
+                          onClick={() => {
+                            setRestoreError(null);
+                            setSelectedBackup(backup);
+                          }}
                           className="flex items-center gap-2"
                         >
                           <Database className="h-4 w-4" />
@@ -371,20 +405,31 @@ const BackupManager: React.FC = () => {
               {t('backup.restoreConfirmation')}: {selectedBackup.backup_name} ({selectedBackup.type})
             </p>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setSelectedBackup(null)}>
+              <Button
+                variant="outline"
+                onClick={() => setSelectedBackup(null)}
+                disabled={isRestoring}
+              >
                 {t('backup.cancel')}
               </Button>
               <Button 
-                onClick={() => {
-                  // Handle restore logic here
-                  setSelectedBackup(null);
-                }}
+                onClick={() => restoreBackup(selectedBackup)}
+                disabled={isRestoring}
                 className="flex items-center gap-2"
               >
-                <Database className="h-4 w-4" />
-                {t('backup.restore')}
+                {isRestoring ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Database className="h-4 w-4" />
+                )}
+                {isRestoring ? t('backup.loading') : t('backup.restore')}
               </Button>
             </div>
+            {restoreError && (
+              <p className="mt-3 text-sm text-red-600" role="alert">
+                {restoreError}
+              </p>
+            )}
           </div>
         </div>
       )}

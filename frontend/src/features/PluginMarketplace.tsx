@@ -1,31 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Package, 
   Search, 
   Star, 
   Download, 
   ExternalLink,
-  Code,
-  Globe,
   GitBranch,
-  Users,
   Calendar,
   RefreshCw,
-  Filter,
-  TrendingUp,
   CheckCircle,
   AlertCircle,
   BookOpen,
   Github,
-  Globe2,
   FileText,
   Zap,
   Palette,
   Music,
-  Layers,
-  Bot,
-  Database,
-  BarChart3
+  Bot
 } from 'lucide-react';
 
 interface RepositoryPlugin {
@@ -192,7 +183,7 @@ const PluginMarketplace: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('downloads');
   const [installingPlugins, setInstallingPlugins] = useState<Set<string>>(new Set());
-  const [sourceRepositories, setSourceRepositories] = useState([
+  const sourceRepositories = [
     {
       id: 'github',
       name: 'GitHub',
@@ -214,7 +205,7 @@ const PluginMarketplace: React.FC = () => {
       description: 'Community-contributed plugin repositories',
       icon: FileText
     }
-  ]);
+  ];
 
   const categories: PluginCategory[] = [
     { id: 'all', name: 'All Plugins', icon: Package, color: 'blue', count: plugins.length },

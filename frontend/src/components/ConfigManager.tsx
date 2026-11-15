@@ -83,8 +83,6 @@ const ConfigManager: React.FC = () => {
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selectedEnv, setSelectedEnv] = useState('');
-
   const fetchData = async () => {
     try {
       const [configRes, environmentsRes] = await Promise.all([
@@ -95,7 +93,6 @@ const ConfigManager: React.FC = () => {
       if (configRes.ok) {
         const configData = await configRes.json();
         setConfig(configData);
-        setSelectedEnv(configData.current.name);
       }
 
       if (environmentsRes.ok) {

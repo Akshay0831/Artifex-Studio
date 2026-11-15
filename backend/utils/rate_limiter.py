@@ -1,26 +1,44 @@
 import time
 import threading
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from fastapi import Request, HTTPException, status
-from fastapi.responses import JSONResponse
 
 # Global rate limiter instance
 class RateLimiter:
     """Rate limiter using sliding window algorithm."""
 
-    def __init__(self):
+    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+        if max_requests < 1:
+            raise ValueError("max_requests must be at least 1")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be at least 1")
+
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
         self.requests: Dict[str, list[float]] = {}
         self.lock = threading.Lock()
         self.cleanup_interval = 300  # 5 minutes
         self.last_cleanup = time.time()
 
-    def is_allowed(self, key: str, max_requests: int = 100, window_seconds: int = 60) -> tuple[bool, int]:
+    def is_allowed(
+        self,
+        key: str,
+        max_requests: Optional[int] = None,
+        window_seconds: Optional[int] = None,
+    ) -> tuple[bool, int]:
         """
         Check if a request is allowed.
 
         Returns:
             tuple[is_allowed, remaining_requests]
         """
+        max_requests = self.max_requests if max_requests is None else max_requests
+        window_seconds = self.window_seconds if window_seconds is None else window_seconds
+        if max_requests < 1:
+            raise ValueError("max_requests must be at least 1")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be at least 1")
+
         now = time.time()
         window_start = now - window_seconds
 
@@ -47,13 +65,14 @@ class RateLimiter:
 
             return True, remaining
 
-    def get_reset_time(self, key: str) -> int:
+    def get_reset_time(self, key: str, window_seconds: Optional[int] = None) -> int:
         """Get the timestamp when the rate limit will be reset."""
+        window_seconds = self.window_seconds if window_seconds is None else window_seconds
         if key not in self.requests or not self.requests[key]:
             return int(time.time())
 
         oldest_request = min(self.requests[key])
-        return int(oldest_request + 60)  # Assuming 60-second window
+        return int(oldest_request + window_seconds)
 
     def get_usage_stats(self, key: str) -> Dict:
         """Get current usage statistics for a key."""
@@ -123,7 +142,11 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Get client IP address (considering proxy headers)
-    client_ip = request.headers.get('X-Forwarded-For', request.client.host)
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    client_ip = forwarded_for.split(',', 1)[0].strip()
+    if not client_ip:
+        client = request.client
+        client_ip = client.host if client is not None else "unknown"
 
     # Check rate limit
     is_allowed, remaining = API_RATE_LIMITER.is_allowed(client_ip)

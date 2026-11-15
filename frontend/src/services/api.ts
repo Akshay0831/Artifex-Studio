@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import type {
   ArtGenerationRequest,
   ExtractedReferencePalette,
@@ -14,13 +14,24 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 // Create axios instance with default config
-const api = axios.create({
+const apiTransport = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+const api = {
+  get: <T = any>(url: string, config?: AxiosRequestConfig) =>
+    apiTransport.get<T>(url, config).then(response => response.data),
+  post: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+    apiTransport.post<T>(url, data, config).then(response => response.data),
+  put: <T = any>(url: string, data?: any, config?: AxiosRequestConfig) =>
+    apiTransport.put<T>(url, data, config).then(response => response.data),
+  delete: <T = any>(url: string, config?: AxiosRequestConfig) =>
+    apiTransport.delete<T>(url, config).then(response => response.data),
+};
 
 const projectsClient = axios.create({
   baseURL: API_BASE_URL,
@@ -48,7 +59,7 @@ projectsClient.interceptors.response.use(
 );
 
 // Request interceptor for logging
-api.interceptors.request.use(
+apiTransport.interceptors.request.use(
   (config) => {
     console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
     return config;
@@ -59,9 +70,9 @@ api.interceptors.request.use(
 );
 
 // Response interceptor for error handling
-api.interceptors.response.use(
+apiTransport.interceptors.response.use(
   (response) => {
-    return response.data;
+    return response;
   },
   (error) => {
     console.error('API Error:', error.response?.data || error.message);
@@ -88,7 +99,7 @@ export const backupApi = {
   getBackups: () => api.get('/api/backup/list'),
   createBackup: (data: { project_id?: string; description?: string; manual?: boolean }) =>
     api.post('/api/backup/create', data),
-  scheduleBackup: () => api.post('/api/backup/schedule_auto_backup'),
+  scheduleBackup: () => api.post('/api/backup/schedule-auto'),
   getBackupStatus: () => api.get('/api/backup/auto-backup/status'),
   enableAutoBackup: (data: { interval_hours?: number; backup_type?: string }) =>
     api.post('/api/backup/auto-backup/enable', data),
@@ -140,19 +151,12 @@ export const artApi = {
     api.post<ImageGenerationResult>('/api/art/generate', data),
   inpaintImage: (data: { base_image: string; mask_image: string; prompt: string; seed?: number; config?: any }) =>
     api.post<ImageGenerationResult>('/api/art/inpaint', data),
-    api.post<ImageGenerationResult>('/api/art/generate', data),
   getGenerationHistory: () => api.get('/api/art/history'),
   getGenerationStatus: (id: string) => api.get(`/api/art/status/${id}`),
   cancelGeneration: (id: string) => api.post(`/api/art/cancel/${id}`),
   saveImage: (data: any) => api.post('/api/art/save', data),
   loadImage: (id: string) => api.get(`/api/art/load/${id}`),
   deleteImage: (id: string) => api.delete(`/api/art/delete/${id}`),
-};
-
-export const toolsApi = {
-  getManifest: () => api.get('/api/tools/manifest'),
-  callTool: (toolName: string, args: Record<string, any>) =>
-    api.post('/api/tools/call', { tool_name: toolName, arguments: args }),
 };
 
 export const localModelsApi = {

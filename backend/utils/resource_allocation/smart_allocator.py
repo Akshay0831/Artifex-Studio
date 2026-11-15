@@ -4,16 +4,12 @@ Implements intelligent resource distribution, load balancing, and capacity manag
 """
 import asyncio
 import time
-import threading
 import logging
-import json
 import numpy as np
-from typing import Dict, Any, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
 import psutil
-import heapq
-from collections import defaultdict, deque
+from collections import deque
 
 logger = logging.getLogger("studio.backend.resource_allocation")
 
@@ -225,8 +221,8 @@ class CostOptimizedStrategy(LoadBalancingStrategy):
 class SmartResourceAllocator:
     """Intelligent resource allocation system"""
     
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        defaults = {
             "default_strategy": "efficient",
             "strategies": {
                 "round_robin": RoundRobinStrategy(),
@@ -241,6 +237,10 @@ class SmartResourceAllocator:
             "prediction_window": 300,  # seconds (5 minutes)
             "energy_threshold": 0.8,  # Energy efficiency threshold
             "cost_threshold": 0.7   # Cost efficiency threshold
+        }
+        self.config = {
+            **defaults,
+            **(config if config is not None else {}),
         }
         
         self.nodes = {}

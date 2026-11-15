@@ -6,7 +6,6 @@ interface TransformControlsProps {
   layer: any;
   onTransform: (transforms: { x: number; y: number; rotation: number; scaleX: number; scaleY: number; skewX: number; skewY: number }) => void;
   onCancel: () => void;
-  canvas: any;
 }
 
 interface TransformState {
@@ -22,9 +21,7 @@ interface TransformState {
   transformStart: { x: number; y: number; rotation: number; scaleX: number; scaleY: number };
 }
 
-const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTransform, onCancel, canvas }) => {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTransform, onCancel }) => {
   const [transformState, setTransformState] = useState<TransformState>({
     x: layer.left || 0,
     y: layer.top || 0,
@@ -90,6 +87,7 @@ const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTra
           break;
           
         case 'rotate':
+        {
           const centerX = layer.left || 0;
           const centerY = layer.top || 0;
           const startAngle = Math.atan2(startY - centerY, startX - centerX);
@@ -101,8 +99,10 @@ const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTra
             rotation: prev.transformStart.rotation + rotationDiff
           }));
           break;
+        }
           
         case 'scale':
+        {
           const scaleFactor = Math.max(0.1, 1 + (deltaX + deltaY) / 200);
           setTransformState(prev => ({
             ...prev,
@@ -110,8 +110,10 @@ const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTra
             scaleY: prev.transformStart.scaleY * scaleFactor
           }));
           break;
+        }
           
         case 'skew':
+        {
           const skewFactor = (deltaX + deltaY) / 100;
           setTransformState(prev => ({
             ...prev,
@@ -119,6 +121,7 @@ const LayerTransformControls: React.FC<TransformControlsProps> = ({ layer, onTra
             skewY: prev.skewY + skewFactor
           }));
           break;
+        }
       }
     };
 

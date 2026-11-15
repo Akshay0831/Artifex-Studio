@@ -1,49 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Code, 
-  Play, 
-  Pause, 
   Save, 
-  FolderOpen,
-  FileText,
-  Settings2,
-  Terminal,
-  Package,
-  TestTube,
-  Eye,
   Download,
   Upload,
   RefreshCw,
-  Zap,
   AlertCircle,
   CheckCircle,
   Timer,
   Plus
 } from 'lucide-react';
-
-interface PluginManifest {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  author: {
-    name: string;
-    email: string;
-    website?: string;
-  };
-  main: string;
-  dependencies?: Record<string, string>;
-  permissions?: string[];
-  sandboxed: boolean;
-  categories: string[];
-  tags: string[];
-  icon?: string;
-  preview?: {
-    images: string[];
-    description?: string;
-  };
-  minStudioVersion?: string;
-}
 
 interface PluginProject {
   id: string;

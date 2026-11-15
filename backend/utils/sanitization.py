@@ -1,12 +1,13 @@
+import json
 import re
 import logging
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Union
 from html import escape
 
 logger = logging.getLogger("studio.backend.sanitization")
 
 class SanitizationResult:
-    def __init__(self, sanitized: str, is_valid: bool, error: Optional[str] = None):
+    def __init__(self, sanitized: Union[str, int, float, bool], is_valid: bool, error: Optional[str] = None):
         self.sanitized = sanitized
         self.is_valid = is_valid
         self.error = error
@@ -75,7 +76,6 @@ def sanitize_json_input(input_str: str) -> SanitizationResult:
     try:
         sanitized = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', input_str)
         
-        import json
         data = json.loads(sanitized)
         
         if not isinstance(data, str):

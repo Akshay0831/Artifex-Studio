@@ -105,6 +105,8 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
             if "text" in message:
                 await manager.handle_message(websocket, message["text"])
             elif "bytes" in message:
@@ -113,4 +115,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     if connection != websocket:
                         await connection.send_bytes(message["bytes"])
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)

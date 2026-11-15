@@ -1,6 +1,8 @@
 import json
+from typing import Any
 
 import pytest
+from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
 import extensions.audio_extension as audio_extension
@@ -10,6 +12,14 @@ from websocket_handler import WebSocketManager
 
 
 client = TestClient(app)
+
+
+class FakeWebSocket(WebSocket):
+    def __init__(self) -> None:
+        self.messages: list[Any] = []
+
+    async def send_json(self, data: Any, mode: str = "text") -> None:
+        self.messages.append(data)
 
 
 def test_audio_model_reports_generation_unavailable():
@@ -39,13 +49,6 @@ async def test_audio_websocket_reports_unavailable_without_completion(monkeypatc
 
     monkeypatch.setattr(audio_extension.audio_service, "compose", unavailable_compose)
 
-    class FakeWebSocket:
-        def __init__(self):
-            self.messages = []
-
-        async def send_json(self, message):
-            self.messages.append(message)
-
     websocket = FakeWebSocket()
     await audio_extension.handle_regenerate_audio(
         websocket,
@@ -68,13 +71,6 @@ async def test_websocket_errors_include_the_requested_operation():
         raise RuntimeError("Audio composition failed.")
 
     manager.register_handler("regenerate_audio", fail_handler)
-
-    class FakeWebSocket:
-        def __init__(self):
-            self.messages = []
-
-        async def send_json(self, message):
-            self.messages.append(message)
 
     websocket = FakeWebSocket()
     await manager.handle_message(

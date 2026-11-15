@@ -1,5 +1,16 @@
 import { useCallback } from 'react';
+import * as Y from 'yjs';
 import { useStudioStore } from './useStudioStore';
+
+type ImageProposalType = 'image_generate' | 'image_inpaint';
+
+interface WorktreeProposal {
+  type: ImageProposalType;
+  data: string;
+  confidence: number;
+  timestamp: number;
+  source: 'ai_tool';
+}
 
 // Hook for managing isolated worktrees.
 export const useWorktree = () => {
@@ -60,6 +71,24 @@ export const useWorktree = () => {
     });
   }, [yDoc, yExperimental, endReview]);
 
+  const createProposal = useCallback((type: ImageProposalType, data: string) => {
+    const proposals = yExperimental.get('proposals');
+    if (!(proposals instanceof Y.Map)) {
+      throw new Error('The project proposal store is unavailable.');
+    }
+
+    const proposalId = `proposal-${crypto.randomUUID()}`;
+    const proposal: WorktreeProposal = {
+      type,
+      data,
+      confidence: 1,
+      timestamp: Date.now(),
+      source: 'ai_tool',
+    };
+    proposals.set(proposalId, proposal);
+    return proposalId;
+  }, [yExperimental]);
+
   return {
     isReviewMode,
     activeProposalId: yExperimental.get('activeProposalId'),
@@ -67,6 +96,7 @@ export const useWorktree = () => {
     startReview,
     endReview,
     commitProposal,
-    discardProposal
+    discardProposal,
+    createProposal,
   };
 };

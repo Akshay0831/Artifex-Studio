@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from models.request_schemas import ImagePaletteSettings
+from models.request_schemas import ImagePaletteSettings, PaletteSourceReference
 from services.palette_service import PaletteProcessingError, PaletteService
 
 
@@ -134,12 +134,12 @@ def test_reference_palette_extraction_rejects_invalid_bytes_and_limits():
 
 
 def test_fixed_palette_metadata_retains_reference_provenance():
-    source_reference = {
-        "project_id": "project-id",
-        "reference_id": "reference-id",
-        "sha256": "a" * 64,
-        "original_filename": "palette.png",
-    }
+    source_reference = PaletteSourceReference(
+        project_id="project-id",
+        reference_id="reference-id",
+        sha256="a" * 64,
+        original_filename="palette.png",
+    )
     source = Image.new("RGB", (1, 1), color=(0, 255, 0))
 
     _, metadata = PaletteService.apply(
@@ -151,7 +151,7 @@ def test_fixed_palette_metadata_retains_reference_provenance():
         ),
     )
 
-    assert metadata["source_reference"] == source_reference
+    assert metadata["source_reference"] == source_reference.model_dump(mode="json")
 
 
 @pytest.mark.parametrize(

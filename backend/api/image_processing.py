@@ -1,6 +1,6 @@
 # Professional image editing capabilities beyond AI generation
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
@@ -9,38 +9,40 @@ import io
 import base64
 from PIL import Image
 import logging
-from middleware.security import SecurityMiddleware
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/image-processing", tags=["image-processing"])
 
-# Security middleware
-security_middleware = SecurityMiddleware()
-
 # Request/Response models
 class LayerAdjustmentRequest(BaseModel):
     layer_id: str
-    adjustment_type: str = Field(..., pattern="^brightness|contrast|saturation|hue|levels|curves$")
+    adjustment_type: str = Field(
+        ...,
+        pattern="^(brightness|contrast|saturation|hue|levels|curves)$",
+    )
     value: float = Field(..., ge=-100, le=100)
     enabled: bool = True
     opacity: float = Field(1.0, ge=0, le=1)
 
 class LayerMaskRequest(BaseModel):
     layer_id: str
-    mask_type: str = Field(..., pattern="^alpha|grayscale|custom$")
+    mask_type: str = Field(..., pattern="^(alpha|grayscale|custom)$")
     intensity: float = Field(1.0, ge=0, le=1)
-    feather: float = Field(0, ge=0, le=100)
+    feather: int = Field(0, ge=0, le=100)
     mask_data: Optional[Dict[str, Any]] = None
 
 class LayerBlendRequest(BaseModel):
     layer_ids: List[str]
-    blend_mode: str = Field(..., pattern="^multiply|screen|overlay|soft-light|hard-light|difference|exclusion$")
+    blend_mode: str = Field(
+        ...,
+        pattern="^(multiply|screen|overlay|soft-light|hard-light|difference|exclusion)$",
+    )
     opacity: float = Field(1.0, ge=0, le=1)
 
 class BatchProcessingRequest(BaseModel):
     operations: List[Dict[str, Any]]
-    format: str = Field("png", pattern="^png|jpeg|tiff|webp$")
+    format: str = Field("png", pattern="^(png|jpeg|tiff|webp)$")
     quality: int = Field(90, ge=1, le=100)
 
 class LayerHistoryRequest(BaseModel):
@@ -73,22 +75,27 @@ class ImageProcessor:
     
     @staticmethod
     def apply_layer_mask(image: np.ndarray, mask: np.ndarray, mask_type: str = "alpha", 
-                        intensity: float = 1.0, feather: float = 0) -> np.ndarray:
+                        intensity: float = 1.0, feather: int = 0) -> np.ndarray:
         """Apply layer mask with feathering"""
         # Apply feathering if specified
         if feather > 0:
-            mask = cv2.GaussianBlur(mask, (feather * 2 + 1, feather * 2 + 1), 0)
+            kernel_size = feather * 2 + 1
+            mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
         
         # Normalize mask
         mask = np.clip(mask.astype(np.float32) * intensity, 0, 255)
+        if mask_type in {"alpha", "grayscale"} and mask.ndim == 3:
+            mask = np.mean(mask, axis=2, keepdims=True)
+        elif mask.ndim == 2:
+            mask = mask[:, :, np.newaxis]
         
         # Apply mask based on type
-        if mask_type == "alpha":
-            result = image.astype(np.float32) * (mask / 255.0)
+        if mask_type == "alpha" and image.ndim == 3 and image.shape[2] == 4:
+            result = image.astype(np.float32)
+            result[:, :, 3:4] *= mask / 255.0
         elif mask_type == "grayscale":
-            gray_mask = np.mean(mask, axis=2, keepdims=True)
-            result = image.astype(np.float32) * (gray_mask / 255.0)
-        else:  # custom
+            result = image.astype(np.float32) * (mask / 255.0)
+        else:
             result = image.astype(np.float32) * (mask / 255.0)
         
         return np.clip(result, 0, 255).astype(np.uint8)
@@ -142,13 +149,25 @@ class ImageProcessor:
         x_points = [p[0] for p in curves_points]
         y_points = [p[1] for p in curves_points]
         
-        # Sort points by x
-        sorted_points = sorted(zip(x_points, y_points), key=lambda p: p[0])
-        x_sorted, y_sorted = zip(*sorted_points)
+        sorted_points = sorted(zip(x_points, y_points), key=lambda point: point[0])
+        x_sorted = [point[0] for point in sorted_points]
+        y_sorted = [point[1] for point in sorted_points]
+        if len(set(x_sorted)) != len(x_sorted):
+            raise ValueError("Curve control points must have unique x coordinates")
+        if x_sorted[0] > 0:
+            x_sorted.insert(0, 0)
+            y_sorted.insert(0, y_sorted[0])
+        if x_sorted[-1] < 255:
+            x_sorted.append(255)
+            y_sorted.append(y_sorted[-1])
         
         # Create interpolation function
         from scipy.interpolate import interp1d
-        curve_func = interp1d(x_sorted, y_sorted, kind='linear', fill_value='extrapolate')
+        curve_func = interp1d(
+            x_sorted,
+            y_sorted,
+            kind="linear",
+        )
         
         # Apply curves
         img = image.astype(np.float32)
@@ -223,6 +242,7 @@ async def apply_layer_mask(request: LayerMaskRequest):
         masked_image = ImageProcessor.apply_layer_mask(
             image, mask, request.mask_type, request.intensity, request.feather
         )
+        layer_data["image_data"] = masked_image
         
         # Store mask information
         layer_data['mask'] = {

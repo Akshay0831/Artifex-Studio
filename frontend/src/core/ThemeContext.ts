@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 
-export type ThemeMode = 'light' | 'dark' | 'auto'
+export type ThemeMode = 'light' | 'dark' | 'auto';
 
 interface ThemeContextType {
   theme: ThemeMode
@@ -8,9 +8,9 @@ interface ThemeContextType {
   isDark: boolean
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
-const THEME_COLORS = {
+export const THEME_COLORS = {
   light: {
     'studio-bg': '248 250 252',
     'studio-bg-hover': '226 232 240',
@@ -94,7 +94,7 @@ const THEME_COLORS = {
 const isThemeMode = (value: string | null): value is ThemeMode =>
   value === 'light' || value === 'dark' || value === 'auto'
 
-const getInitialTheme = (): ThemeMode => {
+export const getInitialTheme = (): ThemeMode => {
   try {
     const savedTheme = localStorage.getItem('theme')
     return isThemeMode(savedTheme) ? savedTheme : 'auto'
@@ -103,47 +103,11 @@ const getInitialTheme = (): ThemeMode => {
   }
 }
 
-const resolveDarkMode = (theme: ThemeMode) =>
+export const resolveDarkMode = (theme: ThemeMode) =>
   theme === 'dark' || (
     theme === 'auto' &&
     window.matchMedia('(prefers-color-scheme: dark)').matches
   )
-
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme)
-  const [isDark, setIsDark] = useState(() => resolveDarkMode(theme))
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const applyTheme = () => {
-      const dark = resolveDarkMode(theme)
-      const root = document.documentElement
-      setIsDark(dark)
-      root.classList.toggle('dark', dark)
-      root.classList.toggle('light', !dark)
-      root.style.colorScheme = dark ? 'dark' : 'light'
-      Object.entries(THEME_COLORS[dark ? 'dark' : 'light']).forEach(([key, value]) => {
-        root.style.setProperty(`--${key}`, value)
-      })
-      try {
-        localStorage.setItem('theme', theme)
-      } catch {
-        // Theme changes still apply for this session when storage is unavailable.
-      }
-    }
-
-    applyTheme()
-    if (theme !== 'auto') return
-    mediaQuery.addEventListener('change', applyTheme)
-    return () => mediaQuery.removeEventListener('change', applyTheme)
-  }, [theme])
-
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme, isDark }}>
-      {children}
-    </ThemeContext.Provider>
-  )
-}
 
 export function useTheme() {
   const context = useContext(ThemeContext)

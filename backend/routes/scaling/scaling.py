@@ -2,7 +2,8 @@
 Scaling Architecture API Routes
 Provides endpoints for horizontal scaling, caching, queue processing, and resource allocation.
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from contextlib import asynccontextmanager
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import asyncio
@@ -17,7 +18,16 @@ from utils.resource_allocation.smart_allocator import resource_allocator, Resour
 
 logger = logging.getLogger("studio.backend.scaling")
 
-router = APIRouter(prefix="/scaling", tags=["scaling"])
+@asynccontextmanager
+async def scaling_lifespan(_app):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
+router = APIRouter(prefix="/scaling", tags=["scaling"], lifespan=scaling_lifespan)
 
 # Request/Response Models
 class InstanceCreateRequest(BaseModel):
@@ -82,7 +92,6 @@ class ClusterStatusResponse(BaseModel):
 scaling_config = ScalingConfig()
 _scaling_components_started = False
 
-@router.on_event("startup")
 async def startup_event():
     """Initialize scaling components on startup"""
     global _scaling_components_started
@@ -140,7 +149,6 @@ async def startup_event():
         logger.error(f"Failed to initialize scaling components: {e}")
         raise
 
-@router.on_event("shutdown")
 async def shutdown_event():
     """Clean up scaling components on shutdown"""
     global _scaling_components_started

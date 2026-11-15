@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Canvas } from 'fabric';
 import * as fabric from 'fabric';
 import { 
-  Folder, 
   FolderOpen, 
   Lock, 
   Unlock, 
@@ -191,9 +190,9 @@ const LayerManager: React.FC<LayerManagerProps> = ({ canvas, onLayerSelect }) =>
     if (!obj) return;
 
     if (direction === 'up' && index < objects.length - 1) {
-      obj.bringForward();
+      canvas.bringObjectForward(obj);
     } else if (direction === 'down' && index > 0) {
-      obj.sendBackwards();
+      canvas.sendObjectBackwards(obj);
     }
     canvas.renderAll();
     updateLayersFromCanvas();

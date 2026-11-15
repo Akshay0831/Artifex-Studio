@@ -1,9 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
-from config.config import settings
 from services.local_model_service import (
     LOCAL_MODEL_CAPABILITIES,
     LOCAL_MODEL_PROVIDERS,
@@ -12,8 +11,6 @@ from services.local_model_service import (
 )
 from utils.dependency_manager import get_current_user
 from utils.api_error_handler import (
-    APIError, 
-    create_error_response, 
     handle_api_key_validation_error,
     handle_rate_limit_error,
     handle_model_not_available_error
@@ -44,15 +41,15 @@ class ApiProfileCreate(ApiProfileBase):
     pass
 
 class ApiProfileUpdate(BaseModel):
-    name: str = Field(None, min_length=1, max_length=100)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
     api_key: Optional[str] = None
     api_type: Optional[str] = Field(None, pattern=r'^(replicate|runpod|openai|ollama|lm_studio)$')
     base_url: Optional[str] = None
-    is_active: bool = None
-    models: List[str] = None
+    is_active: Optional[bool] = None
+    models: Optional[List[str]] = None
     default_model: Optional[str] = None
     temperature: Optional[float] = Field(None, ge=0, le=2)
-    rate_limit: int = Field(None, ge=1, le=1000)
+    rate_limit: Optional[int] = Field(None, ge=1, le=1000)
 
 
 class LocalModelDiscoveryRequest(BaseModel):
@@ -61,13 +58,8 @@ class LocalModelDiscoveryRequest(BaseModel):
 class ApiProfileResponse(ApiProfileBase):
     id: str
     usage_count: int
-    last_used: str = None
+    last_used: Optional[str] = None
     created_at: str
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
 
 # In-memory storage for demonstration (in production, use a database)
 profiles_db = {}
@@ -222,7 +214,7 @@ async def create_profile(
     # Create profile
     profile_id = str(uuid.uuid4())
     profile_data = {
-        **profile.dict(exclude={'models'}),
+        **profile.model_dump(exclude={'models'}),
         'models': profile.models,
         'usage_count': 0,
         'last_used': None,
@@ -257,7 +249,7 @@ async def update_profile(
     existing_profile = profiles_db[profile_id]
     
     # Update fields if provided
-    update_data = updates.dict(exclude_unset=True)
+    update_data = updates.model_dump(exclude_unset=True)
     
     api_type = update_data.get('api_type', existing_profile['api_type'])
     models = update_data.get('models', existing_profile['models'])

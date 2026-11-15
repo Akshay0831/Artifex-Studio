@@ -69,6 +69,7 @@ export const EnhancedSpinner: React.FC<EnhancedSpinnerProps> = ({
 }) => {
   const [show, setShow] = useState(false);
   const [currentProgress, setCurrentProgress] = useState(0);
+  const progressValue = progress ?? percentage;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -79,15 +80,15 @@ export const EnhancedSpinner: React.FC<EnhancedSpinnerProps> = ({
   }, [delay]);
 
   useEffect(() => {
-    if (progress !== undefined && progress !== currentProgress) {
+    if (progressValue !== currentProgress) {
       // Animate progress change
-      const step = (progress - currentProgress) / 10;
+      const step = (progressValue - currentProgress) / 10;
       let current = currentProgress;
       
       const interval = setInterval(() => {
         current += step;
-        if ((step > 0 && current >= progress) || (step < 0 && current <= progress)) {
-          setCurrentProgress(progress);
+        if ((step > 0 && current >= progressValue) || (step < 0 && current <= progressValue)) {
+          setCurrentProgress(progressValue);
           clearInterval(interval);
         } else {
           setCurrentProgress(current);
@@ -96,7 +97,7 @@ export const EnhancedSpinner: React.FC<EnhancedSpinnerProps> = ({
       
       return () => clearInterval(interval);
     }
-  }, [progress, currentProgress]);
+  }, [progressValue, currentProgress]);
 
   if (!show) {
     return children || null;
@@ -152,7 +153,7 @@ export const EnhancedSpinner: React.FC<EnhancedSpinnerProps> = ({
       )}
 
       {/* Progress bar for overlay mode */}
-      {overlay && progress !== undefined && (
+      {overlay && progressValue > 0 && (
         <div className="mt-4 w-64 bg-gray-200 dark:bg-studio-card rounded-full h-2">
           <div
             className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"

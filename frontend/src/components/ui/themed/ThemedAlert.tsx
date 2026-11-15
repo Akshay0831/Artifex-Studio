@@ -1,6 +1,5 @@
 import { forwardRef } from 'react'
 import { cn } from '../../../lib/utils'
-import { useTheme } from '../../../core/ThemeContext'
 import { AlertCircle } from 'lucide-react'
 
 // Type definitions for the component
@@ -24,7 +23,6 @@ const variantStyles: Record<string, string> = {
 
 export const ThemedAlert = forwardRef<HTMLDivElement, ThemedAlertProps>(
   ({ children, variant = 'default', className, ...props }: ThemedAlertProps, ref) => {
-    const { isDark } = useTheme();
     
     return (
       <div

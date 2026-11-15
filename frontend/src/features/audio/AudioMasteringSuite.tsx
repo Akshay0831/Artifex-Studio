@@ -1,19 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Crown, 
-  Zap, 
-  Volume2, 
-  TrendingUp, 
-  BarChart3,
-  Download,
-  Settings2,
-  RotateCcw,
-  Waves,
-  Target,
-  Shield
-} from 'lucide-react';
-import { useStudioStore } from '../../core/useStudioStore';
-import { useAudioComposition } from '../../hooks/useAudioComposition';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Crown, BarChart3 } from 'lucide-react';
 
 interface MasteringPlugin {
   id: string;
@@ -33,9 +19,6 @@ interface LoudnessMeter {
 }
 
 const AudioMasteringSuite: React.FC = () => {
-  const { yAudio } = useStudioStore();
-  const { compose } = useAudioComposition();
-  
   const [plugins, setPlugins] = useState<MasteringPlugin[]>([
     {
       id: 'multiband',
@@ -193,7 +176,7 @@ const AudioMasteringSuite: React.FC = () => {
     });
   };
 
-  const renderLoudnessMeter = () => {
+  const renderLoudnessMeter = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -243,11 +226,11 @@ const AudioMasteringSuite: React.FC = () => {
       const x = ((i + 30) / 30) * width;
       ctx.fillText(`${i}dB`, x, height - 5);
     }
-  };
+  }, [loudness.integrated, targetLoudness]);
 
   useEffect(() => {
     renderLoudnessMeter();
-  }, [loudness, targetLoudness]);
+  }, [renderLoudnessMeter]);
 
   return (
     <div className="flex flex-col h-full bg-studio-panel">
@@ -284,7 +267,7 @@ const AudioMasteringSuite: React.FC = () => {
             <h3 className="text-sm font-medium text-studio-text">Plugin Chain</h3>
           </div>
           <div className="p-2 space-y-2">
-            {plugins.map((plugin, index) => (
+            {plugins.map(plugin => (
               <div
                 key={plugin.id}
                 className="p-3 rounded-lg bg-studio-panel cursor-pointer hover:bg-studio-hover transition-colors"
@@ -320,7 +303,7 @@ const AudioMasteringSuite: React.FC = () => {
                   onClick={() => {
                     const updatedPlugins = plugins.map(p => 
                       p.id === plugin.id 
-                        ? { ...p, parameters: Object.fromEntries(Object.entries(p.parameters).map(([k, v]) => [k, 0])) }
+                        ? { ...p, parameters: Object.fromEntries(Object.keys(p.parameters).map(key => [key, 0])) }
                         : p
                     );
                     setPlugins(updatedPlugins);

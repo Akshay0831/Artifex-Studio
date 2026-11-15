@@ -1,11 +1,12 @@
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Callable, Any, Optional
+from typing import Dict, Callable, Any, Optional, Awaitable
 
 from fastapi import WebSocket, WebSocketDisconnect
-from config import settings
+from config.config import settings
 
 logger = logging.getLogger("studio.backend.websocket_manager")
 
@@ -31,11 +32,15 @@ class EnhancedWebSocketManager:
     
     def __init__(self, idle_timeout: int = 300, max_message_timeout: int = 30):
         self.active_connections: Dict[str, WebSocketConnection] = {}
-        self.handlers: Dict[str, Callable[[WebSocketConnection, Dict[str, Any]], Any]] = {}
+        self.handlers: Dict[str, Callable[[WebSocket, Dict[str, Any]], Awaitable[None]]] = {}
         self.idle_timeout = idle_timeout
         self.max_message_timeout = max_message_timeout
         
-    def register_handler(self, message_type: str, handler: Callable[[WebSocketConnection, Dict[str, Any]], Any]):
+    def register_handler(
+        self,
+        message_type: str,
+        handler: Callable[[WebSocket, Dict[str, Any]], Awaitable[None]],
+    ):
         self.handlers[message_type] = handler
         logger.debug(f"Registered handler: {message_type}")
         
@@ -81,7 +86,6 @@ class EnhancedWebSocketManager:
         conn.update_activity()
         
         try:
-            import json
             payload = json.loads(raw_message)
             message_type = payload.get("type")
             

@@ -10,10 +10,11 @@ import { useWorktree } from './core/useWorktree'
 import { EXTENSION_REGISTRY } from './features/registry'
 import { StudioErrorBoundary } from './features/common/components/StudioErrorBoundary'
 import { GlobalErrorBoundary } from './features/common/components/StudioErrorBoundary'
-import { ThemeProvider, useTheme } from './core/ThemeContext'
-import { ThemeConfigProvider } from './core/ThemeConfigContext'
+import { useTheme } from './core/ThemeContext'
+import { ThemeProvider } from './core/ThemeProvider'
+import { ThemeConfigProvider } from './core/ThemeConfigProvider'
 import { ApiKeyProvider } from './components/ApiKeyManager/ApiKeyContext'
-import { KeyboardShortcutsHelp } from './core/KeyboardShortcuts'
+import { KeyboardShortcutsHelp } from './core/KeyboardShortcutsHelp'
 import { COMMON_SHORTCUTS, useKeyboardShortcuts } from './core/KeyboardShortcuts'
 import { MaterialButton } from './components/common/MaterialButton'
 import { ThemeCustomizationPanel } from './components/ThemeCustomizationPanel'
@@ -186,6 +187,7 @@ function InnerApp() {
             </div>
           )}
           <DockWorkspace
+            collapsedByDefault={['left', 'right']}
             panels={[
               {
                 id: 'controls',

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../i18n/hooks/useTranslation';
 import ProductionDashboard from '../components/ProductionDashboard';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContextValue';
 
 const ProductionPage: React.FC = () => {
   const { t } = useTranslation();

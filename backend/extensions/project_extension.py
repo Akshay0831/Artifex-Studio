@@ -8,7 +8,15 @@ logger = logging.getLogger("studio.backend.extensions.project")
 async def handle_refine_prompt(websocket: WebSocket, message_payload: Dict[str, Any]):
     prompt = message_payload.get("prompt")
     style_preset = message_payload.get("style_preset")
-    
+    if not isinstance(prompt, str) or not prompt.strip():
+        await websocket.send_json({
+            "type": "error",
+            "operation": "refine_prompt",
+            "code": "INVALID_PROMPT",
+            "message": "prompt must be a non-empty string",
+        })
+        return
+
     refined = await project_service.refine_prompt(prompt, style_preset)
     
     await websocket.send_json({

@@ -114,9 +114,13 @@ export const AudioControls: React.FC = () => {
             <div className="flex flex-col gap-2">
               <label className="text-[10px] font-bold text-studio-text-dim uppercase tracking-wider">Master FX Chain</label>
               <div className="flex flex-col gap-1">
-                {effectKeys.map(name => (
-                  <StudioToggle key={name} label={name} yMap={yAudio?.get('effects')} stateKey={name} />
-                ))}
+                {effectKeys.map(name => {
+                  const effectsVal = yAudio?.get('effects');
+                  const effectsMap = effectsVal && typeof effectsVal.observe === 'function' ? effectsVal : undefined;
+                  return (
+                    <StudioToggle key={name} label={name} yMap={effectsMap} stateKey={name} />
+                  );
+                })}
               </div>
             </div>
           </SidebarSection>

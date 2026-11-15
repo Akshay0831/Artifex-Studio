@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from models.request_schemas import GenerateImageRequest, InpaintImageRequest
 from models.response_schemas import ImageResponse
-from art_service import art_service
+from art_service import ImageInpaintingUnavailableError, art_service
 
 router = APIRouter(prefix="/art", tags=["art"])
 logger = logging.getLogger("studio.backend.routes.art")
@@ -47,6 +47,8 @@ async def inpaint_image(request: InpaintImageRequest):
             gen_config=request.config
         )
         return result
+    except ImageInpaintingUnavailableError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

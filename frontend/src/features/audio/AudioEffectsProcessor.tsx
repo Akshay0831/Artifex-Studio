@@ -1,18 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Sliders, 
-  Activity, 
-  Volume2, 
-  RotateCcw, 
-  Download,
-  Upload,
-  Settings2,
-  Zap,
-  Droplets,
-  BarChart3
-} from 'lucide-react';
-import { useStudioStore } from '../../core/useStudioStore';
-import { useAudioComposition } from '../../hooks/useAudioComposition';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 interface AudioEffect {
   id: string;
@@ -30,9 +16,6 @@ interface EQBand {
 }
 
 const AudioEffectsProcessor: React.FC = () => {
-  const { yAudio } = useStudioStore();
-  const { compose } = useAudioComposition();
-  
   const [effects, setEffects] = useState<AudioEffect[]>([
     {
       id: 'eq',
@@ -184,7 +167,7 @@ const AudioEffectsProcessor: React.FC = () => {
     }
   };
 
-  const renderEQ = () => {
+  const renderEQ = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -247,11 +230,11 @@ const AudioEffectsProcessor: React.FC = () => {
       const freq = band.frequency;
       ctx.fillText(freq >= 1000 ? `${freq/1000}k` : `${freq}`, x, height - 5);
     });
-  };
+  }, [eqBands]);
 
   useEffect(() => {
     renderEQ();
-  }, [eqBands]);
+  }, [renderEQ]);
 
   const renderCompressor = () => {
     const effect = effects.find(e => e.id === 'compressor');
@@ -286,7 +269,7 @@ const AudioEffectsProcessor: React.FC = () => {
     );
   };
 
-  const renderSpectrum = () => {
+  const renderSpectrum = useCallback(() => {
     if (!analysisData) return null;
 
     const canvas = canvasRef.current;
@@ -325,11 +308,11 @@ const AudioEffectsProcessor: React.FC = () => {
     ctx.moveTo(0, rmsY);
     ctx.lineTo(width, rmsY);
     ctx.stroke();
-  };
+  }, [analysisData]);
 
   useEffect(() => {
     renderSpectrum();
-  }, [analysisData]);
+  }, [renderSpectrum]);
 
   const selectedEffectData = effects.find(e => e.id === selectedEffect);
 

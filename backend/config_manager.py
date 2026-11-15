@@ -1,8 +1,10 @@
 import json
-import os
 import logging
+import re
+import copy
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 
 logger = logging.getLogger("studio.backend.config_manager")
@@ -12,11 +14,20 @@ class Environment(Enum):
     STAGING = "staging"
     PRODUCTION = "production"
 
+
+def _environment_name(env: Union[Environment, str]) -> str:
+    name = env.value if isinstance(env, Environment) else env
+    normalized = name.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", normalized):
+        raise ValueError(f"Invalid environment name: {name}")
+    return normalized
+
+
 class ConfigManager:
-    def __init__(self, environments_root: Path = None):
+    def __init__(self, environments_root: Optional[Path] = None):
         self.environments_root = environments_root or Path("config/environments")
-        self.current_environment = Environment.DEVELOPMENT
-        self.config_cache = {}
+        self.current_environment = Environment.DEVELOPMENT.value
+        self.config_cache: Dict[str, Dict[str, Any]] = {}
         
         # Create environments directory if it doesn't exist
         self.environments_root.mkdir(parents=True, exist_ok=True)
@@ -29,19 +40,36 @@ class ConfigManager:
         self.config_cache = {}
         
         for env in Environment:
-            config_file = self.environments_root / f"{env.value}.json"
+            name = env.value
+            config_file = self.environments_root / f"{name}.json"
             if config_file.exists():
                 try:
                     with open(config_file, 'r', encoding='utf-8') as f:
-                        self.config_cache[env] = json.load(f)
-                    logger.info(f"Loaded {env.value} configuration")
+                        self.config_cache[name] = json.load(f)
+                    logger.info(f"Loaded {name} configuration")
                 except Exception as e:
-                    logger.error(f"Failed to load {env.value} config: {e}")
-                    self.config_cache[env] = {}
+                    logger.error(f"Failed to load {name} config: {e}")
+                    self.config_cache[name] = {}
             else:
                 # Create default configuration
-                self.config_cache[env] = self._get_default_config(env)
-                self._save_environment_config(env)
+                self.config_cache[name] = self._get_default_config(env)
+                self._save_environment_config(name)
+
+        built_in_names = {env.value for env in Environment}
+        for config_file in self.environments_root.glob("*.json"):
+            name = config_file.stem.lower()
+            if name in built_in_names:
+                continue
+            try:
+                name = _environment_name(name)
+                with config_file.open('r', encoding='utf-8') as file:
+                    config = json.load(file)
+                if not isinstance(config, dict):
+                    raise ValueError("configuration root must be a JSON object")
+                self.config_cache[name] = config
+                logger.info("Loaded custom %s configuration", name)
+            except (OSError, json.JSONDecodeError, ValueError) as error:
+                logger.error("Failed to load custom environment config %s: %s", config_file, error)
 
     def _get_default_config(self, env: Environment) -> Dict[str, Any]:
         """Get default configuration for environment."""
@@ -117,39 +145,47 @@ class ConfigManager:
         
         return base_config
 
-    def _save_environment_config(self, env: Environment):
+    def _save_environment_config(self, env: Union[Environment, str]):
         """Save environment configuration to file."""
-        config_file = self.environments_root / f"{env.value}.json"
+        name = _environment_name(env)
+        config_file = self.environments_root / f"{name}.json"
         try:
             with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config_cache[env], f, indent=2, ensure_ascii=False)
-            logger.info(f"Saved {env.value} configuration")
-        except Exception as e:
-            logger.error(f"Failed to save {env.value} config: {e}")
+                json.dump(self.config_cache[name], f, indent=2, ensure_ascii=False)
+            logger.info("Saved %s configuration", name)
+        except Exception:
+            logger.exception("Failed to save %s config", name)
+            raise
 
-    def set_environment(self, env: Environment):
+    def set_environment(self, env: Union[Environment, str]):
         """Set current environment."""
-        if env in self.config_cache:
-            self.current_environment = env
-            logger.info(f"Switched to {env.value} environment")
+        name = _environment_name(env)
+        if name in self.config_cache:
+            self.current_environment = name
+            logger.info("Switched to %s environment", name)
             return True
         else:
-            logger.error(f"Environment {env.value} not found")
+            logger.error("Environment %s not found", name)
             return False
 
-    def get_current_environment(self) -> Environment:
+    def get_current_environment(self) -> str:
         """Get current environment."""
         return self.current_environment
 
-    def get_config(self, env: Environment = None, path: str = None) -> Any:
+    def get_config(
+        self,
+        env: Optional[Union[Environment, str]] = None,
+        path: Optional[str] = None,
+    ) -> Any:
         """Get configuration value for environment."""
         if env is None:
             env = self.current_environment
-        
-        if env not in self.config_cache:
+        name = _environment_name(env)
+
+        if name not in self.config_cache:
             return None
-        
-        config = self.config_cache[env]
+
+        config = self.config_cache[name]
         
         if path is None:
             return config
@@ -164,56 +200,70 @@ class ConfigManager:
         
         return config
 
-    def set_config(self, env: Environment, path: str, value: Any):
+    def set_config(self, env: Union[Environment, str], path: str, value: Any):
         """Set configuration value for environment."""
-        if env not in self.config_cache:
-            self.config_cache[env] = self._get_default_config(env)
-        
-        config = self.config_cache[env]
-        
-        # Navigate and create nested path (e.g., "server.port")
+        name = _environment_name(env)
+        if name not in self.config_cache:
+            raise ValueError(f"Environment {name} not found")
+
+        previous_config = copy.deepcopy(self.config_cache[name])
+        config = self.config_cache[name]
         keys = path.split('.')
         for key in keys[:-1]:
             if key not in config:
                 config[key] = {}
             config = config[key]
-        
-        config[keys[-1]] = value
-        self._save_environment_config(env)
 
-    def get_database_url(self, env: Environment = None) -> str:
+        config[keys[-1]] = value
+        try:
+            self._save_environment_config(name)
+        except Exception:
+            self.config_cache[name] = previous_config
+            raise
+
+    def get_database_url(self, env: Optional[Union[Environment, str]] = None) -> str:
         """Get database URL for environment."""
         return self.get_config(env or self.current_environment, "database.url")
 
-    def get_server_config(self, env: Environment = None) -> Dict[str, Any]:
+    def get_server_config(self, env: Optional[Union[Environment, str]] = None) -> Dict[str, Any]:
         """Get server configuration for environment."""
         return self.get_config(env or self.current_environment, "server")
 
-    def get_ai_config(self, env: Environment = None) -> Dict[str, Any]:
+    def get_ai_config(self, env: Optional[Union[Environment, str]] = None) -> Dict[str, Any]:
         """Get AI configuration for environment."""
         return self.get_config(env or self.current_environment, "ai")
 
-    def get_monitoring_config(self, env: Environment = None) -> Dict[str, Any]:
+    def get_monitoring_config(self, env: Optional[Union[Environment, str]] = None) -> Dict[str, Any]:
         """Get monitoring configuration for environment."""
         return self.get_config(env or self.current_environment, "monitoring")
 
-    def get_security_config(self, env: Environment = None) -> Dict[str, Any]:
+    def get_security_config(self, env: Optional[Union[Environment, str]] = None) -> Dict[str, Any]:
         """Get security configuration for environment."""
         return self.get_config(env or self.current_environment, "security")
 
-    def get_storage_config(self, env: Environment = None) -> Dict[str, Any]:
+    def get_storage_config(self, env: Optional[Union[Environment, str]] = None) -> Dict[str, Any]:
         """Get storage configuration for environment."""
         return self.get_config(env or self.current_environment, "storage")
 
-    def validate_environment(self, env: Environment) -> Dict[str, Any]:
-        """Validate environment configuration."""
-        config = self.config_cache.get(env, {})
+    def validate_environment(self, env: Union[Environment, str]) -> Dict[str, Any]:
+        """Validate the stored configuration for an environment."""
+        name = _environment_name(env)
+        return self.validate_configuration(self.config_cache.get(name, {}), name)
+
+    def validate_configuration(self, config: Any, env: Union[Environment, str]) -> Dict[str, Any]:
+        """Validate a configuration value without changing stored environment state."""
+        name = _environment_name(env)
         validation_result = {
             "valid": True,
             "errors": [],
             "warnings": [],
-            "environment": env.value
+            "environment": name
         }
+
+        if not isinstance(config, dict):
+            validation_result["valid"] = False
+            validation_result["errors"].append("Configuration must be a dictionary")
+            return validation_result
         
         # Validate server config
         server_config = config.get("server", {})
@@ -235,89 +285,113 @@ class ConfigManager:
 
     def list_environments(self) -> List[str]:
         """List all available environments."""
-        return [env.value for env in Environment]
+        built_in_names = [env.value for env in Environment]
+        custom_names = sorted(name for name in self.config_cache if name not in built_in_names)
+        return built_in_names + custom_names
 
-    def create_custom_environment(self, name: str, base_env: Environment = Environment.DEVELOPMENT):
+    def resolve_environment(self, env: Union[Environment, str]) -> str:
+        """Return a normalized environment name or raise when it is unavailable."""
+        name = _environment_name(env)
+        if name not in self.config_cache:
+            raise ValueError(f"Environment {name} not found")
+        return name
+
+    def create_custom_environment(
+        self,
+        name: str,
+        base_env: Union[Environment, str] = Environment.DEVELOPMENT,
+    ):
         """Create a custom environment based on an existing one."""
         try:
-            custom_env = Environment(name.lower())
-            if custom_env in self.config_cache:
+            custom_name = _environment_name(name)
+            base_name = _environment_name(base_env)
+            if custom_name in {env.value for env in Environment}:
+                return {"success": False, "error": "Cannot create an environment with a built-in name"}
+            if custom_name in self.config_cache:
                 return {"success": False, "error": f"Environment {name} already exists"}
-            
-            # Copy base environment config
-            self.config_cache[custom_env] = self.config_cache.get(base_env, self._get_default_config(base_env))
-            
-            # Save custom environment
-            self._save_environment_config(custom_env)
-            
+            if base_name not in self.config_cache:
+                return {"success": False, "error": f"Base environment {base_name} not found"}
+
+            self.config_cache[custom_name] = copy.deepcopy(self.config_cache[base_name])
+            try:
+                self._save_environment_config(custom_name)
+            except Exception:
+                del self.config_cache[custom_name]
+                raise
+
             return {
                 "success": True,
-                "environment": name,
-                "base_environment": base_env.value
+                "environment": custom_name,
+                "base_environment": base_name
             }
-            
-        except ValueError:
+
+        except ValueError as error:
             return {
                 "success": False,
-                "error": f"Invalid environment name: {name}"
+                "error": str(error)
             }
 
     def delete_custom_environment(self, name: str):
         """Delete a custom environment."""
         try:
-            custom_env = Environment(name.lower())
-            if custom_env in Environment:
+            custom_name = _environment_name(name)
+            if custom_name in {env.value for env in Environment}:
                 return {"success": False, "error": "Cannot delete built-in environment"}
-            
-            if custom_env in self.config_cache:
-                del self.config_cache[custom_env]
-                
-                # Remove config file
-                config_file = self.environments_root / f"{name.lower()}.json"
-                if config_file.exists():
-                    config_file.unlink()
-                
-                return {"success": True, "message": f"Environment {name} deleted"}
-            else:
+            if custom_name == self.current_environment:
+                return {"success": False, "error": "Cannot delete the active environment"}
+            if custom_name not in self.config_cache:
                 return {"success": False, "error": f"Environment {name} not found"}
-                
-        except ValueError:
+
+            config_file = self.environments_root / f"{custom_name}.json"
+            if config_file.exists():
+                config_file.unlink()
+            del self.config_cache[custom_name]
+            return {"success": True, "message": f"Environment {custom_name} deleted"}
+
+        except ValueError as error:
             return {
                 "success": False,
-                "error": f"Invalid environment name: {name}"
+                "error": str(error)
             }
 
-    def export_configuration(self, env: Environment) -> Dict[str, Any]:
+    def export_configuration(self, env: Union[Environment, str]) -> Dict[str, Any]:
         """Export environment configuration as JSON."""
-        if env not in self.config_cache:
-            return {"success": False, "error": f"Environment {env.value} not found"}
-        
+        name = _environment_name(env)
+        if name not in self.config_cache:
+            return {"success": False, "error": f"Environment {name} not found"}
+
         return {
             "success": True,
-            "environment": env.value,
-            "config": self.config_cache[env],
+            "environment": name,
+            "config": self.config_cache[name],
             "exported_at": datetime.now().isoformat()
         }
 
-    def import_configuration(self, env: Environment, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    def import_configuration(self, env: Union[Environment, str], config_data: Any) -> Dict[str, Any]:
         """Import environment configuration from JSON."""
         try:
+            name = _environment_name(env)
             # Validate configuration
             if not isinstance(config_data, dict):
                 return {"success": False, "error": "Configuration must be a dictionary"}
             
             # Validate configuration structure
-            validation = self.validate_environment(env)
+            validation = self.validate_configuration(config_data, name)
             if not validation["valid"]:
                 return {"success": False, "error": f"Configuration validation failed: {validation['errors']}"}
             
             # Import configuration
-            self.config_cache[env] = config_data
-            self._save_environment_config(env)
+            previous_config = self.config_cache[name]
+            self.config_cache[name] = copy.deepcopy(config_data)
+            try:
+                self._save_environment_config(name)
+            except Exception:
+                self.config_cache[name] = previous_config
+                raise
             
             return {
                 "success": True,
-                "environment": env.value,
+                "environment": name,
                 "imported_at": datetime.now().isoformat()
             }
             
@@ -331,22 +405,14 @@ config_manager = ConfigManager()
 def set_environment(env: str):
     """Set current environment by name."""
     try:
-        env_enum = Environment(env.lower())
-        return config_manager.set_environment(env_enum)
+        return config_manager.set_environment(env)
     except ValueError:
         return False
 
 def get_current_environment() -> str:
     """Get current environment name."""
-    return config_manager.get_current_environment().value
+    return config_manager.get_current_environment()
 
-def get_config(path: str, env: str = None) -> Any:
+def get_config(path: str, env: Optional[str] = None) -> Any:
     """Get configuration value by path and optional environment."""
-    env_enum = None
-    if env:
-        try:
-            env_enum = Environment(env.lower())
-        except ValueError:
-            pass
-    
-    return config_manager.get_config(env_enum, path)
+    return config_manager.get_config(env, path)

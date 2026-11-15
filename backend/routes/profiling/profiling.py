@@ -2,16 +2,15 @@
 Performance Profiling API Routes
 Provides real-time performance monitoring, bottleneck detection, and optimization recommendations.
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
-import asyncio
 import json
 import time
 from datetime import datetime
 import logging
 
-from utils.profiling.advanced_profiler import profiler, profile_operation, PerformanceMetric
+from utils.profiling.advanced_profiler import profiler
 from utils.profiling.advanced_profiler import SystemMonitor, OptimizationStrategies
 
 logger = logging.getLogger("studio.backend.profiling")
@@ -22,6 +21,7 @@ router = APIRouter(prefix="/profiling", tags=["profiling"])
 class ProfilingRequest(BaseModel):
     operation: str
     category: str = "general"
+    duration: float = Field(ge=0)
     metadata: Optional[Dict[str, Any]] = None
 
 class OptimizationRequest(BaseModel):
@@ -94,6 +94,7 @@ async def record_operation(request: ProfilingRequest):
         profiler.record_operation(
             operation=request.operation,
             category=request.category,
+            duration=request.duration,
             metadata=request.metadata
         )
         return {"status": "recorded", "operation": request.operation}

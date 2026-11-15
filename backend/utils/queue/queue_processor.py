@@ -1,19 +1,17 @@
 """
 Advanced Queue Processing System for Unified Editing Studio
-Implements priority queues, rate limiting, and batch processing.
+Implements priority queues, rate limiting, and task retries.
 """
 import asyncio
+import inspect
 import time
 import threading
 import logging
-import json
 import uuid
 import heapq
-from typing import Dict, Any, List, Optional, Callable, Union, AsyncGenerator
+from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from enum import Enum
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque, defaultdict
 
@@ -51,6 +49,7 @@ class QueueTask:
     timeout: int = 300  # seconds
     metadata: Dict[str, Any] = field(default_factory=dict)
     error_message: Optional[str] = None
+    result: Any = None
     
     def __lt__(self, other):
         """For priority queue comparison"""
@@ -87,75 +86,18 @@ class RateLimiter:
         while not await self.can_proceed():
             await asyncio.sleep(0.1)
 
-class BatchProcessor:
-    """Processes tasks in batches for efficiency"""
-    
-    def __init__(self, batch_size: int = 10, batch_timeout: int = 5):
-        self.batch_size = batch_size
-        self.batch_timeout = batch_timeout
-        self.current_batch = []
-        self.batch_timer = None
-        self.processor_func = None
-        self.lock = threading.Lock()
-        
-    async def add_task(self, task: QueueTask):
-        """Add task to batch processor"""
-        with self.lock:
-            self.current_batch.append(task)
-            
-            if len(self.current_batch) >= self.batch_size:
-                await self._process_batch()
-            elif self.batch_timer is None:
-                self.batch_timer = asyncio.create_task(self._batch_timeout())
-    
-    async def _batch_timeout(self):
-        """Process batch after timeout"""
-        await asyncio.sleep(self.batch_timeout)
-        with self.lock:
-            if self.current_batch:
-                await self._process_batch()
-            self.batch_timer = None
-    
-    async def _process_batch(self):
-        """Process current batch"""
-        batch = self.current_batch
-        self.current_batch = []
-        
-        if batch and self.processor_func:
-            try:
-                # Group tasks by type for efficient processing
-                task_groups = defaultdict(list)
-                for task in batch:
-                    task_groups[task.metadata.get("task_type", "general")].append(task)
-                
-                # Process each group
-                for task_type, tasks in task_groups.items():
-                    await self.processor_func(task_type, tasks)
-                    
-            except Exception as e:
-                logger.error(f"Batch processing failed: {e}")
-                # Retry failed tasks
-                for task in batch:
-                    if task.status == TaskStatus.FAILED and task.retry_count < task.max_retries:
-                        task.retry_count += 1
-                        task.status = TaskStatus.PENDING
-                        # Re-queue for retry
-                        await self.add_task(task)
-
 class QueueProcessor:
-    """Main queue processing system"""
+    """Priority queue with rate limiting, retries, and task lifecycle management."""
     
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config if config is not None else {
             "max_concurrent_tasks": 10,
             "default_timeout": 300,
             "max_retries": 3,
             "enable_rate_limiting": True,
             "rate_limit_max": 100,
             "rate_limit_window": 60,
-            "batch_size": 5,
-            "batch_timeout": 2,
-            "queue_ttl": 3600  # 1 hour
+            "queue_ttl": 3600
         }
         
         # Priority queues
@@ -169,12 +111,6 @@ class QueueProcessor:
         self.rate_limiter = RateLimiter(
             max_requests=self.config.get("rate_limit_max", 100),
             time_window=self.config.get("rate_limit_window", 60)
-        )
-        
-        # Batch processor
-        self.batch_processor = BatchProcessor(
-            batch_size=self.config.get("batch_size", 5),
-            batch_timeout=self.config.get("batch_timeout", 2)
         )
         
         # Task handlers
@@ -302,6 +238,7 @@ class QueueProcessor:
             task = self.running_tasks[task_id]
             task.status = TaskStatus.COMPLETED
             task.completed_at = time.time()
+            task.result = result
             
             # Move to completed tasks
             self.completed_tasks[task_id] = task
@@ -316,7 +253,7 @@ class QueueProcessor:
             
             logger.debug(f"Completed task {task_id}")
     
-    async def fail_task(self, task_id: str, error_message: str = None):
+    async def fail_task(self, task_id: str, error_message: Optional[str] = None):
         """Mark a task as failed"""
         if task_id in self.running_tasks:
             task = self.running_tasks[task_id]
@@ -378,11 +315,11 @@ class QueueProcessor:
             
             if handler:
                 # Execute task with timeout
-                await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     self._execute_handler(handler, task),
                     timeout=task.timeout
                 )
-                await self.complete_task(task.task_id)
+                await self.complete_task(task.task_id, result)
             else:
                 raise ValueError(f"No handler found for task type: {task_type}")
                 
@@ -391,15 +328,15 @@ class QueueProcessor:
         except Exception as e:
             await self.fail_task(task.task_id, str(e))
     
-    async def _execute_handler(self, handler: Callable, task: QueueTask):
+    async def _execute_handler(self, handler: Callable, task: QueueTask) -> Any:
         """Execute a task handler"""
         # Check if handler is async
-        if asyncio.iscoroutinefunction(handler):
-            await handler(task)
+        if inspect.iscoroutinefunction(handler):
+            return await handler(task)
         else:
             # Run in thread pool for CPU-bound tasks
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(self.thread_pool, handler, task)
+            return await loop.run_in_executor(self.thread_pool, handler, task)
     
     async def _cleanup_loop(self):
         """Cleanup loop for old tasks"""
@@ -510,6 +447,7 @@ class QueueProcessor:
             "timeout": task.timeout,
             "metadata": task.metadata,
             "error_message": task.error_message,
+            "result": task.result,
             "processing_time": task.completed_at - task.started_at if task.completed_at and task.started_at else None
         }
 

@@ -6,14 +6,12 @@ import time
 import threading
 import asyncio
 import logging
-import json
 import psutil
 import numpy as np
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from collections import deque
-from datetime import datetime, timedelta
-import hashlib
+from datetime import datetime
 
 logger = logging.getLogger("studio.backend.profiling")
 
@@ -133,17 +131,6 @@ class AdvancedProfiler:
         finally:
             loop.close()
     
-    async def _analysis_loop(self):
-        """Background analysis loop"""
-        while self.is_running:
-            try:
-                # Perform periodic analysis
-                await self._periodic_analysis()
-                await asyncio.sleep(30)  # Analyze every 30 seconds
-            except Exception as e:
-                logger.error(f"Error in analysis loop: {e}")
-                await asyncio.sleep(60)
-        
     def record_operation(self, operation: str, category: str, duration: float, 
                         metadata: Optional[Dict[str, Any]] = None):
         """Record a performance operation"""

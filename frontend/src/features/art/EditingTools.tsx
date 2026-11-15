@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as fabric from 'fabric';
-import { Canvas, IText, Point } from 'fabric';
+import { Canvas, IText } from 'fabric';
 import { 
   Brush, 
   Eraser, 

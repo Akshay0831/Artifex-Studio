@@ -6,18 +6,11 @@ import asyncio
 import time
 import threading
 import logging
-import json
-import hashlib
 import pickle
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 import redis
-import aiocache
-import aiocache.serializers
-from aiocache import cached, Cache
-from concurrent.futures import ThreadPoolExecutor
-import weakref
+from aiocache import cached
 
 logger = logging.getLogger("studio.backend.caching")
 
@@ -51,8 +44,8 @@ class CacheStats:
 class CacheManager:
     """Multi-level cache manager with intelligent policies"""
     
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config if config is not None else {
             "local_cache_size": 1000,
             "redis_enabled": True,
             "redis_url": "redis://localhost:6379",
@@ -179,6 +172,10 @@ class CacheManager:
                 try:
                     cached_data = self.redis_cache.get(full_key)
                     if cached_data:
+                        if not isinstance(cached_data, bytes):
+                            raise TypeError(
+                                "Redis returned non-binary data for a compressed cache entry"
+                            )
                         value = self._decompress_data(cached_data)
                         
                         # Add to local cache
@@ -211,16 +208,23 @@ class CacheManager:
             logger.error(f"Cache get failed for key {key}: {e}")
             return default
     
-    async def set(self, key: str, value: Any, ttl: int = None, tags: List[str] = None) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        ttl: Optional[int] = None,
+        tags: Optional[List[str]] = None,
+    ) -> bool:
         """Set value in cache"""
         start_time = time.time()
         full_key = self._get_cache_key(key)
-        ttl = ttl or self.config.get("cache_ttl", 3600)
+        if ttl is None:
+            configured_ttl = self.config.get("cache_ttl", 3600)
+            if not isinstance(configured_ttl, int):
+                raise TypeError("Configured cache TTL must be an integer")
+            ttl = configured_ttl
         
         try:
-            # Calculate size
-            size_bytes = len(pickle.dumps(value))
-            
             # Add to local cache
             await self._add_to_local_cache(full_key, value, ttl, tags)
             
@@ -242,7 +246,13 @@ class CacheManager:
             logger.error(f"Cache set failed for key {key}: {e}")
             return False
     
-    async def _add_to_local_cache(self, full_key: str, value: Any, ttl: int, tags: List[str] = None):
+    async def _add_to_local_cache(
+        self,
+        full_key: str,
+        value: Any,
+        ttl: int,
+        tags: Optional[List[str]] = None,
+    ):
         """Add entry to local cache"""
         with self.local_cache_lock:
             # Remove expired entries if cache is full

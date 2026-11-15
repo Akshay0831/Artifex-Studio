@@ -1,19 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   Puzzle, 
   Download, 
-  Upload, 
   Star, 
-  Settings, 
   Trash2,
   Plus,
   Search,
-  Filter,
   RefreshCw,
   Eye,
   EyeOff,
-  Play,
-  Pause,
   Code,
   Globe,
   Package,
@@ -50,35 +45,6 @@ interface Plugin {
     images: string[];
     demoUrl?: string;
   };
-}
-
-interface PluginManifest {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  author: {
-    name: string;
-    email: string;
-    website?: string;
-  };
-  main: string;
-  dependencies?: Record<string, string>;
-  permissions?: string[];
-  sandboxed: boolean;
-  categories: string[];
-  tags: string[];
-  icon?: string;
-  preview?: {
-    images: string[];
-    demoUrl?: string;
-  };
-}
-
-interface PluginRegistry {
-  plugins: Map<string, Plugin>;
-  installedPlugins: Map<string, PluginManifest>;
-  disabledPlugins: Set<string>;
 }
 
 const PluginManager: React.FC = () => {
@@ -254,10 +220,6 @@ const PluginManager: React.FC = () => {
           : p
       ));
     }
-  };
-
-  const getPriceDisplay = () => {
-    return 'Free Open-Source';
   };
 
   const formatDate = (dateString: string) => {

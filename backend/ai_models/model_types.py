@@ -3,7 +3,6 @@ Model Types and Quantization Enums
 """
 
 from enum import Enum
-from typing import Literal
 
 class ModelType(Enum):
     """Supported AI model types"""
@@ -44,7 +43,10 @@ QUANTIZATION_MAPPING = {
 
 def get_model_type(model_name: str) -> ModelType:
     """Get ModelType from string name"""
-    return MODEL_TYPE_MAPPING.get(model_name.lower(), ModelType.SDXL)
+    try:
+        return MODEL_TYPE_MAPPING[model_name.lower()]
+    except KeyError as error:
+        raise ValueError(f"Unsupported model type: {model_name}") from error
 
 def get_quantization_type(quant_name: str) -> QuantizationType:
     """Get QuantizationType from string name"""

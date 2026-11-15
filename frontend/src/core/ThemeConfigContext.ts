@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext } from 'react'
 
 // Theme configuration types
 export interface MaterialTheme {
@@ -24,7 +24,7 @@ interface ThemeConfigContextType {
 }
 
 // Default theme configuration
-const DEFAULT_THEME: MaterialTheme = {
+export const DEFAULT_THEME: MaterialTheme = {
   density: 'normal',
   spacing: 'normal',
   accentColor: 'primary',
@@ -40,7 +40,7 @@ export const SPACING_MULTIPLIERS: Record<MaterialTheme['spacing'], number> = {
   'extra-spacious': 1.375,
 }
 
-const ThemeConfigContext = createContext<ThemeConfigContextType | undefined>(undefined)
+export const ThemeConfigContext = createContext<ThemeConfigContextType | undefined>(undefined)
 
 function isOption<T extends string>(value: unknown, options: readonly T[]): value is T {
   return typeof value === 'string' && options.some(option => option === value)
@@ -50,7 +50,7 @@ function pickOption<T extends string>(value: unknown, options: readonly T[], fal
   return isOption(value, options) ? value : fallback
 }
 
-function loadSavedTheme(): MaterialTheme {
+export function loadSavedTheme(): MaterialTheme {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem('material-theme') || 'null')
     if (typeof saved !== 'object' || saved === null) return DEFAULT_THEME
@@ -68,7 +68,7 @@ function loadSavedTheme(): MaterialTheme {
 }
 
 // Material Design spacing scales based on user preference
-const SPACING_SCALES = {
+export const SPACING_SCALES = {
   tight: {
     xs: '0.125rem',
     sm: '0.25rem',
@@ -117,7 +117,7 @@ const SPACING_SCALES = {
 }
 
 // Corner radius mappings
-const BORDER_RADIUS = {
+export const BORDER_RADIUS = {
   minimal: {
     xs: '2px',
     sm: '4px',
@@ -156,62 +156,13 @@ const BORDER_RADIUS = {
   }
 }
 
-const ACCENT_VARIABLES: Record<MaterialTheme['accentColor'], string> = {
+export const ACCENT_VARIABLES: Record<MaterialTheme['accentColor'], string> = {
   primary: '--studio-primary',
   secondary: '--studio-secondary',
   accent: '--studio-accent-default',
   success: '--studio-success',
   error: '--studio-error',
   warning: '--studio-warning',
-}
-
-export function ThemeConfigProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<MaterialTheme>(loadSavedTheme)
-
-  const globalSpacingScale = useMemo(() => SPACING_SCALES[theme.spacing], [theme.spacing])
-
-  useEffect(() => {
-    const root = document.documentElement
-    Object.entries(SPACING_SCALES[theme.spacing]).forEach(([key, value]) => {
-      root.style.setProperty(`--spacing-${key}`, value)
-    })
-    Object.entries(BORDER_RADIUS[theme.borderRadius]).forEach(([key, value]) => {
-      root.style.setProperty(`--radius-${key}`, value)
-    })
-
-    root.style.setProperty('--studio-spacing-scale', String(SPACING_MULTIPLIERS[theme.spacing]))
-    root.style.setProperty('--studio-accent', `var(${ACCENT_VARIABLES[theme.accentColor]})`)
-    root.dataset.spacing = theme.spacing
-    root.dataset.borderRadius = theme.borderRadius
-    root.dataset.animations = theme.animations
-
-    const densityScale = {
-      compact: 0.8,
-      normal: 1,
-      comfortable: 1.2
-    }
-    root.style.setProperty('--density-scale', densityScale[theme.density].toString())
-
-    try {
-      localStorage.setItem('material-theme', JSON.stringify(theme))
-    } catch {
-      // Appearance changes still apply for this session when storage is unavailable.
-    }
-  }, [theme])
-
-  const setThemeProperty = (updates: Partial<MaterialTheme>) => {
-    setTheme(prev => ({ ...prev, ...updates }))
-  }
-
-  return (
-    <ThemeConfigContext.Provider value={{ 
-      theme, 
-      setTheme: setThemeProperty,
-      globalSpacingScale
-    }}>
-      {children}
-    </ThemeConfigContext.Provider>
-  )
 }
 
 export function useThemeConfig() {

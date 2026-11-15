@@ -1,5 +1,4 @@
 import requests
-import json
 import time
 import logging
 import threading
@@ -220,7 +219,7 @@ class ApiService:
     ) -> Dict[str, Any]:
         """Generate text using selected API profile"""
         api_type = provider_config.get('api_type') if provider_config else None
-        if api_type in LOCAL_MODEL_PROVIDERS:
+        if provider_config is not None and api_type in LOCAL_MODEL_PROVIDERS:
             try:
                 result = await local_model_service.generate_text(
                     provider=api_type,

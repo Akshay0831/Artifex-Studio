@@ -1,7 +1,6 @@
 // Shared type definitions for Art Studio components
 
 import { Canvas } from 'fabric';
-import * as fabric from 'fabric';
 
 // Point type for canvas coordinates
 export interface Point {

@@ -189,7 +189,7 @@ const AudioToolLookup: React.FC<AudioToolLookupProps> = ({
   };
 
   // Get current track state
-  const getTrackState = (_trackId: number) => {
+  const getTrackState = () => {
     // For now, return default state
     return {
       volume: 0.8,
@@ -240,7 +240,7 @@ const AudioToolLookup: React.FC<AudioToolLookupProps> = ({
           </div>
           <div className="space-y-2">
             {[1, 2, 3, 4].map(trackId => {
-              const trackState = getTrackState(trackId);
+              const trackState = getTrackState();
               return (
                 <div key={trackId} className="flex items-center gap-2">
                   <span className="text-xs w-8">Track {trackId}</span>

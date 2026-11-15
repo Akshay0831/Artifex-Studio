@@ -5,7 +5,7 @@ import { useStudioStore } from '../../core/useStudioStore';
 import { useArtGeneration } from '../../hooks/useArtGeneration';
 import { useWorktree } from '../../core/useWorktree';
 import { useProjectConfig } from '../../core/useProjectConfig';
-import { useApiKey } from '../../components/ApiKeyManager/ApiKeyContext';
+import { useApiKey } from '../../components/ApiKeyManager/ApiKeyContextValue';
 import { textGenerationApi } from '../../services/api';
 import { useActiveImageTool } from '../../hooks/useImageEditor';
 import { useToolShortcuts } from '../../hooks/useToolShortcuts';
@@ -22,7 +22,7 @@ import type {
   ProjectReference,
 } from '../../types/api';
 import { ProjectReferenceLibrary } from '../common/ProjectReferenceLibrary';
-import { projectsApi, artApi } from '../../services/api';
+import { projectsApi } from '../../services/api';
 
 const ART_TOOL_SHORTCUTS = {
   select: 'v',
@@ -100,7 +100,6 @@ export const ArtControls: React.FC = () => {
   const [preserveAlpha, setPreserveAlpha] = useState(true);
   const [targetWorktree, setTargetWorktree] = useState<'main' | 'experimental'>('main');
   const [isRefining, setIsRefining] = useState(false);
-  const [isInpainting, setIsInpainting] = useState(false);
   const handleShortcutChange = (toolId: string, value: string) => {
     const error = updateShortcut(toolId, value);
     if (error) toast.error(error);
@@ -276,33 +275,6 @@ export const ArtControls: React.FC = () => {
         timestamp: Date.now(),
         generation_settings: { palette: settings },
       }]);
-    }
-  };
-
-  const handleInpaint = async () => {
-    if (!yImage) return;
-    const baseImage = yImage.get('baseImageData');
-    if (!baseImage) {
-      toast.error('Place or generate a base image on canvas before inpainting.');
-      return;
-    }
-    const maskImage = yImage.get('maskLayerData') || baseImage;
-    setIsInpainting(true);
-    try {
-      const res = await artApi.inpaintImage({
-        base_image: baseImage,
-        mask_image: maskImage,
-        prompt: prompt || 'high quality detail',
-        seed: seed || 42,
-      });
-      if (res && res.image_base64) {
-        promote(res.image_base64, paletteSettings());
-        toast.success('Inpainting completed successfully!');
-      }
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || err?.message || 'Inpainting failed');
-    } finally {
-      setIsInpainting(false);
     }
   };
 
@@ -617,7 +589,7 @@ export const ArtControls: React.FC = () => {
                 </div>
               </SidebarSection>
 
-              {/* Generate & Inpaint Buttons */}
+              {/* Generate and unavailable feature controls */}
               <button 
                 onClick={handleGenerate}
                 disabled={!prompt.trim() && !isGenerating}
@@ -625,18 +597,13 @@ export const ArtControls: React.FC = () => {
               >
                 {isGenerating ? 'STOP' : 'GENERATE'}
               </button>
-              <button 
+              <button
                 type="button"
-                onClick={handleInpaint}
-                disabled={isInpainting || isGenerating}
-                className={`w-full py-2 rounded font-bold text-xs transition-all border ${
-                  isInpainting 
-                    ? 'bg-amber-900/50 text-amber-200 border-amber-800' 
-                    : 'bg-black/40 border-studio-border text-studio-text hover:bg-studio-hover hover:border-studio-accent'
-                }`}
-                title="Inpaint using canvas mask and prompt"
+                disabled
+                className="w-full py-2 rounded border border-studio-border bg-black/20 text-xs font-bold text-studio-text-dim opacity-60 cursor-not-allowed"
+                title="Image inpainting is not implemented for the configured backends."
               >
-                {isInpainting ? 'INPAINTING...' : 'INPAINT MASK AREA'}
+                INPAINT MASK AREA - UNAVAILABLE
               </button>
               {generationError && (
                 <p role="alert" className="text-xs text-red-400">

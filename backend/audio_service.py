@@ -1,23 +1,9 @@
 import logging
-import asyncio
-from typing import Dict, Optional, Any, Callable, List
+from typing import Dict, Optional, Any, Callable
 
-from config.config import Settings
-settings = Settings()
-from inference_dispatcher import dispatcher
 from utils.telemetry import trace_performance
-from utils.cache import generation_cache
 from utils.encoding import audio_to_base64
 from ai_models.audio_model import AudioGenerationUnavailableError, get_audio_model
-
-# Audio generation configuration
-class MusicGenerationConfig:
-    def __init__(self):
-        self.bpm = 120
-        self.key = "C"
-        self.scale = "major"
-        self.mood = "Neutral"
-        self.bars = 4
 
 from utils.base_service import BaseStudioService
 
@@ -26,22 +12,8 @@ logger = logging.getLogger("studio.backend.audio_service")
 class AudioService(BaseStudioService):
     def __init__(self):
         super().__init__("audio")
-        self.orchestrator: Optional[CompositionOrchestrator] = None
+        self.orchestrator: Optional[Any] = None
         self.audio_model = get_audio_model()
-
-    def _ensure_orchestrator(self, audio_config: Dict[str, Any]):
-        """Initializes the configuration lazily."""
-        if not hasattr(self, 'music_config') or self.music_config is None:
-            self.music_config = MusicGenerationConfig()
-            self.music_config.bpm = audio_config.get("bpm", self.music_config.bpm)
-            self.music_config.key = audio_config.get("key", self.music_config.key)
-            self.music_config.scale = audio_config.get("scale", self.music_config.scale)
-            
-            # Composer engine selection
-            composer = audio_config.get("composer", "standard")
-            logger.info(f"Audio Service | Using composer: {composer}")
-            
-            self.orchestrator = CompositionOrchestrator(orchestration_config, output_dir="./studio_output/audio")
 
     @trace_performance("audio_composition")
     async def compose(

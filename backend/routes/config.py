@@ -3,11 +3,10 @@ Configuration Manager API Routes
 Handles multi-environment configuration management
 """
 
-from typing import Dict, Any, List
-from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from config_manager import config_manager, Environment
-from utils.monitoring import health_monitor
+from config_manager import config_manager
 import time
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -46,7 +45,7 @@ async def get_current_environment():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "config": config,
             "validation": validation,
             "timestamp": time.time()
@@ -60,11 +59,11 @@ async def set_environment(
 ):
     """Set current environment."""
     try:
-        success = config_manager.set_environment(Environment(environment.lower()))
+        success = config_manager.set_environment(environment)
         
         if success:
             config = config_manager.get_config()
-            validation = config_manager.validate_environment(Environment(environment.lower()))
+            validation = config_manager.validate_environment(environment)
             
             return {
                 "success": True,
@@ -89,7 +88,7 @@ async def get_environment_config(
 ):
     """Get configuration for a specific environment."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         
         if path:
             config_value = config_manager.get_config(env_enum, path)
@@ -130,7 +129,7 @@ async def update_environment_config(
 ):
     """Update configuration value for a specific environment."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         
         # Convert string values to appropriate types
         if isinstance(value, str):
@@ -167,22 +166,14 @@ async def update_environment_config(
 @router.post("/env/{env_name}/validate", response_model=Dict[str, Any])
 async def validate_environment_config(
     env_name: str,
-    config_data: Dict[str, Any] = None
+    config_data: Optional[Dict[str, Any]] = None
 ):
     """Validate environment configuration."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         
-        if config_data:
-            # Validate provided config data
-            # Temporarily set config for validation
-            original_config = config_manager.get_config(env_enum)
-            config_manager.config_cache[env_enum] = config_data
-            
-            validation = config_manager.validate_environment(env_enum)
-            
-            # Restore original config
-            config_manager.config_cache[env_enum] = original_config
+        if config_data is not None:
+            validation = config_manager.validate_configuration(config_data, env_enum)
         else:
             # Validate current config
             validation = config_manager.validate_environment(env_enum)
@@ -206,7 +197,7 @@ async def create_custom_environment(
 ):
     """Create a custom environment based on an existing one."""
     try:
-        result = config_manager.create_custom_environment(env_name, Environment(base_env.lower()))
+        result = config_manager.create_custom_environment(env_name, base_env)
         
         if result["success"]:
             return {
@@ -250,7 +241,7 @@ async def delete_custom_environment(env_name: str):
 async def export_environment_config(env_name: str):
     """Export environment configuration."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         result = config_manager.export_configuration(env_enum)
         
         if result["success"]:
@@ -276,7 +267,7 @@ async def import_environment_config(
 ):
     """Import environment configuration."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         result = config_manager.import_configuration(env_enum, config_data)
         
         if result["success"]:
@@ -299,7 +290,7 @@ async def import_environment_config(
 async def get_config_sections(env_name: str):
     """Get configuration sections for an environment."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         config = config_manager.get_config(env_enum)
         
         if not isinstance(config, dict):
@@ -320,7 +311,7 @@ async def get_config_section(
 ):
     """Get a specific configuration section."""
     try:
-        env_enum = Environment(env_name.lower())
+        env_enum = config_manager.resolve_environment(env_name)
         section_config = config_manager.get_config(env_enum, section)
         
         if section_config is None:
@@ -351,7 +342,7 @@ async def get_server_config():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "config": server_config,
             "timestamp": time.time()
         }
@@ -368,7 +359,7 @@ async def get_database_config():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "database_url": database_url,
             "config": database_config,
             "timestamp": time.time()
@@ -385,7 +376,7 @@ async def get_ai_config():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "config": ai_config,
             "timestamp": time.time()
         }
@@ -401,7 +392,7 @@ async def get_security_config():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "config": security_config,
             "timestamp": time.time()
         }
@@ -417,7 +408,7 @@ async def get_storage_config():
         
         return {
             "success": True,
-            "environment": current_env.value,
+            "environment": current_env,
             "config": storage_config,
             "timestamp": time.time()
         }

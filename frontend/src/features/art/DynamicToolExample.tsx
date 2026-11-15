@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ToolType, ToolSettings, Point } from './types';
-import { useDynamicToolRegistry } from './DynamicToolRegistry';
-import { useDynamicComponents } from './DynamicComponentFactory';
+import { ToolType, ToolSettings } from './types';
+import { useDynamicComponents } from './useDynamicComponents';
 
 interface DynamicToolProps {
   toolType: ToolType;
@@ -21,8 +20,7 @@ export const DynamicBrushTool: React.FC<DynamicToolProps> = ({
   onActivate,
   onDeactivate
 }) => {
-  const { registry } = useDynamicToolRegistry();
-  const { addComponent, removeComponent, getComponent } = useDynamicComponents();
+  const { addComponent } = useDynamicComponents();
   
   const [brushSize, setBrushSize] = useState(settings.brushSize);
   const [brushColor, setBrushColor] = useState(settings.brushColor);
@@ -295,7 +293,6 @@ export const DynamicBrushTool: React.FC<DynamicToolProps> = ({
 
 // Example: A dynamic shape tool
 export const DynamicShapeTool: React.FC<DynamicToolProps> = ({
-  toolType,
   settings,
   onSettingsChange,
   isActive,

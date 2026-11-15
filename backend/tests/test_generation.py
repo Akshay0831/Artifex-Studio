@@ -1,10 +1,13 @@
+import base64
 import time
 from uuid import uuid4
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from app import app
+from art_service import art_service
 from routes.api_management.api_management import profiles_db
 from services.api_service import ApiService, api_service
 
@@ -166,6 +169,120 @@ def test_local_text_profiles_reject_non_text_generation(generation_type):
 
     assert response.status_code == 400
     assert "text generation only" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("api_type", "provider_method"),
+    [
+        ("replicate", "_generate_replicate"),
+        ("runpod", "_generate_runpod"),
+        ("openai", "_generate_openai"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_art_provider_receives_selected_profile_key(
+    api_type, provider_method, monkeypatch
+):
+    received = {}
+
+    async def fake_provider(
+        prompt,
+        seed,
+        gen_config,
+        model,
+        stream_callback=None,
+        *,
+        api_key=None,
+    ):
+        received["api_key"] = api_key
+        return {"image_base64": "encoded-image", "seed": seed, "backend": "api"}
+
+    monkeypatch.setattr(art_service, provider_method, fake_provider)
+
+    result = await art_service._generate_api(
+        {
+            "api_type": api_type,
+            "api_key": "test-provider-key",
+            "prompt": "A test image",
+            "seed": 7,
+            "gen_config": {},
+            "model": "test-model",
+        }
+    )
+
+    assert received["api_key"] == "test-provider-key"
+    assert result["image_base64"] == "encoded-image"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_error"),
+    [
+        ("prompt", None, "A non-empty prompt is required"),
+        ("seed", None, "An integer seed is required"),
+        ("model", None, "A model must be selected"),
+        ("gen_config", None, "settings must be an object"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_api_generation_rejects_missing_or_invalid_required_values(
+    field, value, expected_error
+):
+    config = {
+        "api_type": "replicate",
+        "api_key": "test-provider-key",
+        "prompt": "A test image",
+        "seed": 7,
+        "gen_config": {},
+        "model": "test-model",
+    }
+    config[field] = value
+
+    result = await art_service._generate_api(config)
+
+    assert expected_error in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_replicate_image_response_is_encoded_as_base64(monkeypatch):
+    image_bytes = b"\x89PNG\r\n\x1a\nimage"
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None, content=b""):
+            self.status_code = status_code
+            self.payload = payload or {}
+            self.content = content
+            self.text = ""
+
+        def json(self):
+            return self.payload
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(_url, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Token test-provider-key"
+        return FakeResponse(201, {"urls": {"get": "prediction-url"}})
+
+    def fake_get(url, **_kwargs):
+        if url == "prediction-url":
+            return FakeResponse(
+                200,
+                {"status": "succeeded", "output": ["image-url"]},
+            )
+        return FakeResponse(200, content=image_bytes)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    result = await art_service._generate_replicate(
+        "A test image",
+        3,
+        {},
+        "test-model",
+        api_key="test-provider-key",
+    )
+
+    assert result["image_base64"] == base64.b64encode(image_bytes).decode("ascii")
 
 
 @pytest.mark.parametrize(

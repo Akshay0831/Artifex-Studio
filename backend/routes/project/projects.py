@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
+from models.request_schemas import PaletteSourceReference
 from models.response_schemas import ReferencePaletteResponse
 from services.palette_service import PaletteProcessingError, palette_service
 from services.project_asset_service import (
@@ -246,12 +247,14 @@ async def extract_reference_palette(
             )
         )
         return ReferencePaletteResponse(
-            source_reference={
-                "project_id": reference["project_id"],
-                "reference_id": reference["id"],
-                "sha256": reference["sha256"],
-                "original_filename": reference["original_filename"],
-            },
+            source_reference=PaletteSourceReference.model_validate(
+                {
+                    "project_id": reference["project_id"],
+                    "reference_id": reference["id"],
+                    "sha256": reference["sha256"],
+                    "original_filename": reference["original_filename"],
+                }
+            ),
             max_colors=max_colors,
             colors=colors,
         )

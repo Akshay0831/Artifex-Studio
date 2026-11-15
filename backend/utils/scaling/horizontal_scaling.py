@@ -4,17 +4,10 @@ Implements load balancing, auto-scaling, and distributed resource management.
 """
 import asyncio
 import time
-import threading
 import logging
-import json
 import random
-import hashlib
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import psutil
-import aiohttp
-import aiohttp.web
 
 logger = logging.getLogger("studio.backend.scaling")
 
@@ -54,8 +47,8 @@ class ScalingConfig:
 class LoadBalancer:
     """Intelligent load balancer with multiple strategies"""
     
-    def __init__(self, instances: List[InstanceInfo] = None):
-        self.instances = instances or []
+    def __init__(self, instances: Optional[List[InstanceInfo]] = None):
+        self.instances = instances if instances is not None else []
         self.current_strategy = "round_robin"
         self.strategy_index = 0
         self.strategies = ["round_robin", "least_loaded", "weighted_cpu", "response_time"]
@@ -313,8 +306,8 @@ class AutoScaler:
 class HorizontalScaler:
     """Main horizontal scaling orchestrator"""
     
-    def __init__(self, config: ScalingConfig = None):
-        self.config = config or ScalingConfig()
+    def __init__(self, config: Optional[ScalingConfig] = None):
+        self.config = config if config is not None else ScalingConfig()
         self.auto_scaler = AutoScaler(self.config)
         self.load_balancer = LoadBalancer()
         self.health_check_task = None

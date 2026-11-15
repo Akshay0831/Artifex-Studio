@@ -9,7 +9,6 @@ from ai_models.model_training import TrainingMetrics
 from app import app
 from fastapi.testclient import TestClient
 from routes.scaling import scaling
-from routes.scaling.scaling import startup_event as scaling_startup_event
 from utils.sanitization import sanitize_html
 from websocket_handler import manager
 
@@ -52,10 +51,6 @@ def test_websocket_extensions_register_core_handlers():
         "analyze_scene",
         "update_project_config",
     }.issubset(manager.handlers)
-
-
-def test_scaling_startup_hook_is_registered_once():
-    assert app.router.on_startup.count(scaling_startup_event) == 1
 
 
 def test_scaling_lifecycle_starts_and_stops_components_once():

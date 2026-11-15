@@ -4,11 +4,10 @@
 Simple test server to verify API management functionality
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 import uuid
-import json
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -35,24 +34,24 @@ class ApiProfile(BaseModel):
     api_type: str = Field(..., pattern=r'^(replicate|runpod|openai)$')
     is_active: bool = True
     models: List[str] = Field(default_factory=list)
-    default_model: str = None
+    default_model: Optional[str] = None
     rate_limit: int = Field(default=60, ge=1, le=1000)
 
 class ApiProfileCreate(ApiProfile):
     pass
 
 class ApiProfileUpdate(BaseModel):
-    name: str = Field(None, min_length=1, max_length=100)
-    api_key: str = Field(None, min_length=1)
-    is_active: bool = None
-    models: List[str] = None
-    default_model: str = None
-    rate_limit: int = Field(None, ge=1, le=1000)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    api_key: Optional[str] = Field(default=None, min_length=1)
+    is_active: Optional[bool] = None
+    models: Optional[List[str]] = None
+    default_model: Optional[str] = None
+    rate_limit: Optional[int] = Field(default=None, ge=1, le=1000)
 
 class ApiProfileResponse(ApiProfile):
     id: str
     usage_count: int
-    last_used: str = None
+    last_used: Optional[str] = None
     created_at: str
 
 class GenerationRequest(BaseModel):
@@ -163,7 +162,7 @@ async def create_profile(profile: ApiProfileCreate):
     # Create profile
     profile_id = str(uuid.uuid4())
     profile_data = {
-        **profile.dict(exclude={'models'}),
+        **profile.model_dump(exclude={'models'}),
         'models': profile.models,
         'usage_count': 0,
         'last_used': None,

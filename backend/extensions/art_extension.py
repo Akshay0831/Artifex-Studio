@@ -5,8 +5,15 @@ from art_service import art_service
 
 logger = logging.getLogger("studio.backend.extensions.art")
 
+def _required_string(payload: Dict[str, Any], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
 async def handle_generate_image(websocket: WebSocket, message_payload: Dict[str, Any]):
-    prompt = message_payload.get("prompt")
+    prompt = _required_string(message_payload, "prompt")
     variation_count = message_payload.get("num_variations", 1)
     base_seed = message_payload.get("seed", 42)
     gen_config = message_payload.get("config", {})
@@ -41,10 +48,10 @@ async def handle_generate_image(websocket: WebSocket, message_payload: Dict[str,
         })
 
 async def handle_inpaint_image(websocket: WebSocket, message_payload: Dict[str, Any]):
-    prompt = message_payload.get("prompt")
+    prompt = _required_string(message_payload, "prompt")
     seed = message_payload.get("seed", 42)
-    base_image = message_payload.get("base_image")
-    mask_image = message_payload.get("mask_image")
+    base_image = _required_string(message_payload, "base_image")
+    mask_image = _required_string(message_payload, "mask_image")
     gen_config = message_payload.get("config", {})
     target_worktree = message_payload.get("worktree", "main")
     

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Play, RefreshCw, CheckCircle, AlertTriangle, Sparkles, Layers, Sliders } from 'lucide-react';
+import { Bot, Play, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { toolsApi } from '../../services/api';
 import { useWorktree } from '../../core/useWorktree';
@@ -29,59 +29,26 @@ export const AiToolAssistant: React.FC = () => {
     mood: 'Cyberpunk'
   });
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [lastResult, setLastResult] = useState<any>(null);
-
+  const [manifestError, setManifestError] = useState<string | null>(null);
   const { createProposal } = useWorktree();
 
   // Load tools manifest
   const loadManifest = async () => {
+    setManifestError(null);
     try {
       const resp: any = await toolsApi.getManifest();
-      if (resp && resp.tools) {
-        setTools(resp.tools);
+      if (!Array.isArray(resp?.tools)) {
+        throw new Error('The server returned an invalid tools manifest.');
       }
-    } catch (e) {
-      // Fallback offline mock tools
-      setTools([
-        {
-          name: 'image.generate',
-          extension_id: 'art',
-          description: 'Generates a new image or sprite from text prompt.',
-          parameters: {
-            type: 'object',
-            properties: {
-              prompt: { type: 'string', description: 'Text prompt' },
-              seed: { type: 'integer', default: 42 },
-              steps: { type: 'integer', default: 20 }
-            }
-          }
-        },
-        {
-          name: 'image.inpaint',
-          extension_id: 'art',
-          description: 'Fills a designated mask area on the current image canvas.',
-          parameters: {
-            type: 'object',
-            properties: {
-              prompt: { type: 'string', description: 'Text guidance' },
-              seed: { type: 'integer', default: 42 }
-            }
-          }
-        },
-        {
-          name: 'audio.compose',
-          extension_id: 'audio',
-          description: 'Generates multi-track music sequence conforming to BPM, key, and mood.',
-          parameters: {
-            type: 'object',
-            properties: {
-              bpm: { type: 'integer', default: 120 },
-              key: { type: 'string', default: 'C' },
-              mood: { type: 'string', default: 'Neutral' }
-            }
-          }
-        }
-      ]);
+      setTools(resp.tools);
+      setSelectedTool(current => resp.tools.some((tool: ToolDef) => tool.name === current)
+        ? current
+        : resp.tools[0]?.name || '');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The tools manifest could not be loaded.';
+      setTools([]);
+      setManifestError(message);
+      toast.error(`Could not load AI tools: ${message}`);
     }
   };
 
@@ -95,25 +62,23 @@ export const AiToolAssistant: React.FC = () => {
 
   const handleExecuteTool = async () => {
     setIsLoading(true);
-    setLastResult(null);
     try {
       const resp: any = await toolsApi.callTool(selectedTool, params);
       if (resp && resp.status === 'success') {
-        setLastResult(resp.result);
-        
         // Post output to Worktree proposal for non-destructive review
         if (selectedTool.startsWith('image.')) {
           const base64Data = resp.result?.image_base64 || resp.result?.data;
           if (base64Data) {
-            createProposal('image_layer', base64Data);
+            createProposal(
+              selectedTool === 'image.inpaint' ? 'image_inpaint' : 'image_generate',
+              base64Data,
+            );
             toast.success('Generated proposal added to review queue!');
+          } else {
+            toast.error('The tool succeeded without returning image data.');
           }
         } else if (selectedTool.startsWith('audio.')) {
-          const audioUrl = resp.result?.output_url || resp.result?.url;
-          if (audioUrl) {
-            createProposal('audio_layer', audioUrl);
-            toast.success('Generated audio proposal added to review queue!');
-          }
+          toast.error('Audio composition is unavailable; no audio proposal was created.');
         }
       } else {
         toast.error(resp?.error || 'Tool execution failed');
@@ -150,6 +115,7 @@ export const AiToolAssistant: React.FC = () => {
       <select
         value={selectedTool}
         onChange={e => setSelectedTool(e.target.value)}
+        disabled={!tools.length}
         className="w-full bg-black/50 border border-studio-border rounded px-2 py-1 text-xs text-studio-text font-mono focus:outline-none"
       >
         {tools.map(t => (
@@ -158,6 +124,16 @@ export const AiToolAssistant: React.FC = () => {
           </option>
         ))}
       </select>
+
+      {manifestError && (
+        <p role="alert" className="text-[10px] text-red-300">
+          AI tools are unavailable: {manifestError}
+        </p>
+      )}
+
+      {!manifestError && tools.length === 0 && (
+        <p className="text-[10px] text-studio-text-dim">No AI tools are available from the backend.</p>
+      )}
 
       {activeDef && (
         <p className="text-[9px] text-studio-text-dim leading-snug">

@@ -88,17 +88,23 @@ export class ApiErrorHandler {
         return 'Rate limit exceeded. Please try again later';
       
       case 'external_api_error':
+      {
         const provider = error.details?.provider;
         return `${provider} service error: ${error.details?.external_error}`;
+      }
       
       case 'insufficient_quota':
+      {
         const quotaProvider = error.details?.provider;
         return `${quotaProvider} quota exceeded. Please upgrade your plan`;
+      }
       
       case 'model_not_available':
+      {
         const model = error.details?.model;
         const modelProvider = error.details?.provider;
         return `Model '${model}' is not available for ${modelProvider}`;
+      }
       
       case 'invalid_request':
         return error.detail || 'Invalid request';

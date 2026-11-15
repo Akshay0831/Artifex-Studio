@@ -1,11 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Path
+from fastapi import APIRouter, HTTPException, Body, Query, Path
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-import json
 import os
-from datetime import datetime
+import shutil
 from backup_service import BackupService
-from utils.monitoring import health_monitor
 import time
 
 # Create backup service instance
@@ -40,7 +39,6 @@ class BackupResponse(BaseModel):
 async def create_backup(request: BackupRequest):
     """Create a new backup."""
     try:
-        backup_service = BackupService()
         result = await backup_service.create_backup(
             project_id=request.project_id,
             manual=request.manual,
@@ -90,7 +88,7 @@ async def get_backup_info(
 @router.post("/restore/{backup_id}", response_model=Dict[str, Any])
 async def restore_backup(
     backup_id: str = Path(..., description="Backup ID"),
-    request: RestoreRequest = Depends()
+    request: RestoreRequest = Body(...)
 ):
     """Restore a backup."""
     try:
@@ -130,12 +128,11 @@ async def delete_backup(
 
 @router.post("/schedule-auto")
 async def schedule_auto_backup():
-    """Schedule automatic backup."""
-    try:
-        result = await backup_service.schedule_auto_backup()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that background automatic backup scheduling is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail="Automatic backup scheduling is not implemented.",
+    )
 
 @router.get("/statistics", response_model=Dict[str, Any])
 async def get_backup_statistics():
@@ -183,16 +180,11 @@ async def download_backup(
         if not os.path.exists(backup_path):
             raise HTTPException(status_code=404, detail=f"Backup file not found: {backup_path}")
         
-        # Read the file content
-        with open(backup_path, 'rb') as f:
-            file_content = f.read()
-        
-        return {
-            "content": file_content,
-            "filename": os.path.basename(backup_path),
-            "size": len(file_content),
-            "content_type": "application/zip"
-        }
+        return FileResponse(
+            backup_path,
+            filename=os.path.basename(backup_path),
+            media_type="application/zip",
+        )
         
     except HTTPException:
         raise
@@ -211,7 +203,6 @@ async def get_backup_health():
         }
         
         # Check backup directory
-        backup_service = BackupService()
         try:
             if os.path.exists(backup_service.backup_dir):
                 health_status["checks"]["backup_directory"] = "ok"
@@ -224,11 +215,10 @@ async def get_backup_health():
         
         # Check disk space (Windows compatible)
         try:
-            import shutil
             backup_dir = backup_service.backup_dir
             if os.path.exists(backup_dir):
-                total, used, free = shutil.disk_usage(backup_dir)
-                if free > 1024 * 1024 * 1024:  # At least 1GB free
+                disk_usage = shutil.disk_usage(backup_dir)
+                if disk_usage.free > 1024 * 1024 * 1024:  # At least 1GB free
                     health_status["checks"]["disk_space"] = "ok"
                 else:
                     health_status["checks"]["disk_space"] = "low_space"
@@ -277,132 +267,73 @@ async def enable_auto_backup(
     interval_hours: int = Query(24, ge=1, le=168, description="Backup interval in hours (1-168)"),
     backup_type: str = Query("project", description="Backup type: project, full")
 ):
-    """Enable automatic backup with specified interval."""
-    try:
-        result = await backup_service.enable_auto_backup(interval_hours, backup_type)
-        
-        return {
-            "success": result.get("success", False),
-            "message": result.get("message", "Auto-backup configuration updated"),
-            "config": {
-                "enabled": True,
-                "interval_hours": interval_hours,
-                "backup_type": backup_type,
-                "next_backup": backup_service.get_next_scheduled_backup_time()
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that background automatic backup scheduling is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Automatic backup scheduling is not implemented "
+            f"(requested interval: {interval_hours}h, type: {backup_type})."
+        ),
+    )
 
 @router.post("/auto-backup/disable", response_model=Dict[str, Any])
 async def disable_auto_backup():
-    """Disable automatic backup."""
-    try:
-        result = await backup_service.disable_auto_backup()
-        
-        return {
-            "success": result.get("success", False),
-            "message": result.get("message", "Auto-backup disabled"),
-            "config": {
-                "enabled": False,
-                "was_enabled": result.get("was_enabled", False)
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that background automatic backup scheduling is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail="Automatic backup scheduling is not implemented.",
+    )
 
 @router.get("/export", response_model=Dict[str, Any])
 async def export_backup_config():
-    """Export backup configuration."""
-    try:
-        config = backup_service.get_backup_config()
-        config["exported_at"] = datetime.now().isoformat()
-        config["version"] = "1.0"
-        
-        return {
-            "success": True,
-            "config": config,
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that backup configuration export is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail="Backup configuration export is not implemented.",
+    )
 
 @router.post("/import", response_model=Dict[str, Any])
 async def import_backup_config(request: Dict[str, Any]):
-    """Import backup configuration."""
-    try:
-        # Validate configuration structure
-        required_keys = ["backup_dir", "max_backups", "backup_interval", "auto_backup_enabled"]
-        if not all(key in request for key in required_keys):
-            raise HTTPException(status_code=400, detail="Invalid configuration format")
-        
-        result = await backup_service.import_backup_config(request)
-        
-        return {
-            "success": result.get("success", False),
-            "message": result.get("message", "Configuration imported successfully"),
-            "config_hash": hash(str(request)),
-            "timestamp": time.time()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that backup configuration import is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Backup configuration import is not implemented "
+            f"({len(request)} configuration keys supplied)."
+        ),
+    )
 
 @router.get("/validate/{backup_id}", response_model=Dict[str, Any])
 async def validate_backup(
     backup_id: str = Path(..., description="Backup ID")
 ):
-    """Validate a backup file."""
-    try:
-        result = await backup_service.validate_backup(backup_id)
-        
-        return {
-            "success": result.get("success", False),
-            "backup_id": backup_id,
-            "valid": result.get("valid", False),
-            "check_results": result.get("check_results", {}),
-            "errors": result.get("errors", []),
-            "warnings": result.get("warnings", []),
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that dedicated backup validation is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail=f"Dedicated validation for backup {backup_id} is not implemented.",
+    )
 
 @router.get("/compare", response_model=Dict[str, Any])
 async def compare_backups(
     backup_id1: str = Query(..., description="First backup ID"),
     backup_id2: str = Query(..., description="Second backup ID")
 ):
-    """Compare two backups."""
-    try:
-        result = await backup_service.compare_backups(backup_id1, backup_id2)
-        
-        return {
-            "success": result.get("success", False),
-            "backup_id1": backup_id1,
-            "backup_id2": backup_id2,
-            "comparison": result.get("comparison", {}),
-            "differences": result.get("differences", []),
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that backup comparison is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail=f"Backup comparison for {backup_id1} and {backup_id2} is not implemented.",
+    )
 
 @router.get("/history", response_model=Dict[str, Any])
 async def get_backup_history():
-    """Get backup operation history."""
-    try:
-        history = backup_service.get_backup_history()
-        
-        return {
-            "success": True,
-            "history": history,
-            "total_operations": len(history),
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Get the persisted backup creation history."""
+    history = backup_service.backup_history
+    return {
+        "success": True,
+        "history": history,
+        "total_operations": len(history),
+        "timestamp": time.time(),
+    }
 
 @router.get("/cleanup", response_model=Dict[str, Any])
 async def cleanup_old_backups(
@@ -410,17 +341,11 @@ async def cleanup_old_backups(
     keep_days: int = Query(30, ge=1, description="Keep backups from last N days"),
     force: bool = Query(False, description="Force cleanup without confirmation")
 ):
-    """Clean up old backups."""
-    try:
-        result = await backup_service.cleanup_old_backups(keep_minimum, keep_days, force)
-        
-        return {
-            "success": result.get("success", False),
-            "message": result.get("message", "Cleanup completed"),
-            "cleaned_backups": result.get("cleaned_backups", []),
-            "freed_space_mb": result.get("freed_space_mb", 0),
-            "remaining_backups": result.get("remaining_backups", 0),
-            "timestamp": time.time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Report that manual retention cleanup is unavailable."""
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Manual backup cleanup is not implemented "
+            f"(keep_minimum={keep_minimum}, keep_days={keep_days}, force={force})."
+        ),
+    )

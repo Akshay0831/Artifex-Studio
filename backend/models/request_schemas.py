@@ -14,7 +14,7 @@ class PaletteSourceReference(BaseModel):
 class ImagePaletteSettings(BaseModel):
     mode: Literal["off", "extract", "fixed", "maximum"] = "off"
     colors: List[str] = Field(default_factory=list, max_length=256)
-    max_colors: Optional[int] = Field(None, ge=1, le=256)
+    max_colors: Optional[int] = Field(default=None, ge=1, le=256)
     dither: bool = False
     preserve_alpha: bool = True
     source_reference: Optional[PaletteSourceReference] = None
@@ -54,7 +54,9 @@ class GenerateImageRequest(BaseModel):
     negative_prompt: Optional[str] = Field(None, max_length=500)
     seed: int = Field(42, ge=0)
     config: Dict = Field(default_factory=dict)
-    palette: ImagePaletteSettings = Field(default_factory=ImagePaletteSettings)
+    palette: ImagePaletteSettings = Field(
+        default_factory=lambda: ImagePaletteSettings.model_validate({})
+    )
     prefer_local: bool = Field(True)
 
 class InpaintImageRequest(BaseModel):

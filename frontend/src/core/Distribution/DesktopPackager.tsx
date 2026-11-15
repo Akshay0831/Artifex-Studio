@@ -1,14 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Package, 
   Download, 
-  Upload, 
-  ExternalLink,
-  Settings,
   Shield,
   Zap,
-  Monitor,
-  Smartphone,
   Globe,
   FileText,
   CheckCircle,
@@ -16,27 +11,12 @@ import {
   Clock,
   BarChart3,
   Layers,
-  Play,
-  Pause,
   FolderOpen,
-  Save,
   RefreshCw,
   Box,
   Target,
-  Users,
-  DollarSign,
-  Code
+  DollarSign
 } from 'lucide-react';
-
-interface BuildTarget {
-  id: string;
-  name: string;
-  platform: 'windows' | 'macos' | 'linux' | 'web';
-  arch: 'x64' | 'arm64' | 'universal';
-  icon: string;
-  description: string;
-  recommended: boolean;
-}
 
 interface BuildConfig {
   id: string;
@@ -59,19 +39,6 @@ interface BuildConfig {
   progress: number;
   logs: string[];
   artifacts: string[];
-}
-
-interface DistributionPackage {
-  id: string;
-  name: string;
-  version: string;
-  platform: string;
-  arch: string;
-  size: number;
-  checksum: string;
-  downloadUrl: string;
-  changelog: string;
-  releaseDate: Date;
 }
 
 const DesktopPackager: React.FC = () => {
@@ -144,93 +111,8 @@ const DesktopPackager: React.FC = () => {
     }
   ]);
 
-  const [distributionPackages, setDistributionPackages] = useState<DistributionPackage[]>([
-    {
-      id: 'dist-1',
-      name: 'Studio Pro',
-      version: '1.0.0',
-      platform: 'windows',
-      arch: 'x64',
-      size: 125000000,
-      checksum: 'sha256:abc123...',
-      downloadUrl: 'https://downloads.studio-pro.com/v1.0.0/Studio-Pro-Windows.exe',
-      changelog: 'Initial release with full feature set',
-      releaseDate: new Date('2026-07-16')
-    }
-  ]);
-
   const [selectedConfig, setSelectedConfig] = useState<BuildConfig | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
-  const [buildTarget, setBuildTarget] = useState<string>('windows-x64');
-  const [autoPublish, setAutoPublish] = useState(false);
-  const [releaseNotes, setReleaseNotes] = useState('');
-
-  const buildTargets: BuildTarget[] = [
-    {
-      id: 'windows-x64',
-      name: 'Windows (64-bit)',
-      platform: 'windows',
-      arch: 'x64',
-      icon: '🪟',
-      description: 'Windows installer with auto-update and system integration',
-      recommended: true
-    },
-    {
-      id: 'windows-arm64',
-      name: 'Windows (ARM64)',
-      platform: 'windows',
-      arch: 'arm64',
-      icon: '🪟',
-      description: 'Windows ARM64 portable application',
-      recommended: false
-    },
-    {
-      id: 'macos-x64',
-      name: 'macOS (Intel)',
-      platform: 'macos',
-      arch: 'x64',
-      icon: '🍎',
-      description: 'macOS application bundle with code signing',
-      recommended: false
-    },
-    {
-      id: 'macos-arm64',
-      name: 'macOS (Apple Silicon)',
-      platform: 'macos',
-      arch: 'arm64',
-      icon: '🍎',
-      description: 'Native Apple Silicon application bundle',
-      recommended: true
-    },
-    {
-      id: 'linux-x64',
-      name: 'Linux (64-bit)',
-      platform: 'linux',
-      arch: 'x64',
-      icon: '🐧',
-      description: 'Linux portable application',
-      recommended: true
-    },
-    {
-      id: 'linux-arm64',
-      name: 'Linux (ARM64)',
-      platform: 'linux',
-      arch: 'arm64',
-      icon: '🐧',
-      description: 'Linux ARM64 portable application',
-      recommended: false
-    },
-    {
-      id: 'web-pwa',
-      name: 'Web PWA',
-      platform: 'web',
-      arch: 'universal',
-      icon: '🌐',
-      description: 'Progressive Web App for browser deployment',
-      recommended: true
-    }
-  ];
-
   const startBuild = async (configId: string) => {
     if (isBuilding) return;
     
@@ -279,24 +161,6 @@ const DesktopPackager: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const uploadToStore = async (platform: string) => {
-    // Simulate store upload
-    alert(`Uploading to ${platform} store...`);
-  };
-
-  const formatFileSize = (bytes: number) => {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-    
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex++;
-    }
-    
-    return `${size.toFixed(2)} ${units[unitIndex]}`;
   };
 
   const getStatusColor = (status: string) => {

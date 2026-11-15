@@ -1,6 +1,5 @@
 import React, { forwardRef } from 'react'
 import { cn } from '../../../lib/utils'
-import { useTheme } from '../../../core/ThemeContext'
 import { ChevronDown } from 'lucide-react'
 
 export interface ThemedSelectProps {
@@ -14,8 +13,6 @@ export interface ThemedSelectProps {
 
 export const ThemedSelect = forwardRef<HTMLDivElement, ThemedSelectProps>(
   ({ children, value, onValueChange, placeholder, disabled = false, className, ...props }, ref) => {
-    const { isDark } = useTheme()
-    
     return (
       <div
         ref={ref}
@@ -52,8 +49,6 @@ export interface ThemedSelectTriggerProps {
 
 export const ThemedSelectTrigger = forwardRef<HTMLButtonElement, ThemedSelectTriggerProps>(
   ({ children, className, ...props }, ref) => {
-    const { isDark } = useTheme()
-    
     return (
       <button
         ref={ref}
@@ -76,8 +71,6 @@ export interface ThemedSelectValueProps {
 
 export const ThemedSelectValue = forwardRef<HTMLSpanElement, ThemedSelectValueProps>(
   ({ placeholder, className, ...props }, ref) => {
-    const { isDark } = useTheme()
-    
     return (
       <span
         ref={ref}
@@ -100,8 +93,6 @@ export interface ThemedSelectContentProps {
 
 export const ThemedSelectContent = forwardRef<HTMLDivElement, ThemedSelectContentProps>(
   ({ children, className, ...props }, ref) => {
-    const { isDark } = useTheme()
-    
     return (
       <div
         ref={ref}
@@ -125,11 +116,10 @@ export interface ThemedSelectItemProps {
 
 export const ThemedSelectItem = forwardRef<HTMLDivElement, ThemedSelectItemProps>(
   ({ children, value, className, ...props }, ref) => {
-    const { isDark } = useTheme()
-    
     return (
       <div
         ref={ref}
+        data-value={value}
         className={cn(
           'relative flex w-full cursor-default select-none items-center rounded-sm px-8 py-1.5 text-sm outline-none transition-colors hover:bg-studio-hover focus:bg-studio-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
           className

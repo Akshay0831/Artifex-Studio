@@ -2,22 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Wrench, 
   Scan, 
-  Zap, 
-  Droplets, 
-  Mic,
-  RotateCcw,
-  Download,
-  Upload,
-  Settings2,
-  Play,
-  Pause,
-  Volume2,
-  BarChart3,
   TrendingDown,
   AlertTriangle
 } from 'lucide-react';
-import { useStudioStore } from '../../core/useStudioStore';
-import { useAudioComposition } from '../../hooks/useAudioComposition';
 
 interface RestorationTool {
   id: string;
@@ -39,9 +26,6 @@ interface NoiseProfile {
 }
 
 const AudioRestorationTools: React.FC = () => {
-  const { yAudio } = useStudioStore();
-  const { compose } = useAudioComposition();
-  
   const [tools, setTools] = useState<RestorationTool[]>([
     {
       id: 'declick',

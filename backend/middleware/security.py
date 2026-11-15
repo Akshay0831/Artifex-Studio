@@ -1,10 +1,10 @@
 # Phase 3: Enhancements - Security Middleware
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 import logging
-from typing import List
+from typing import List, Optional
+from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
 
@@ -13,46 +13,52 @@ class SecurityMiddleware:
     
     def __init__(
         self,
-        allowed_origins: List[str] = None,
-        allowed_methods: List[str] = None,
-        allowed_headers: List[str] = None,
+        allowed_origins: Optional[List[str]] = None,
+        allowed_methods: Optional[List[str]] = None,
+        allowed_headers: Optional[List[str]] = None,
         max_age: int = 86400
     ):
-        self.allowed_origins = allowed_origins or [
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://localhost:80",
-            "http://studio.unifiedediting.com",
-            "https://studio.unifiedediting.com"
-        ]
-        self.allowed_methods = allowed_methods or [
-            "GET",
-            "POST",
-            "PUT",
-            "DELETE",
-            "OPTIONS",
-            "PATCH"
-        ]
-        self.allowed_headers = allowed_headers or [
-            "accept",
-            "accept-encoding",
-            "authorization",
-            "content-type",
-            "dnt",
-            "origin",
-            "user-agent",
-            "x-csrftoken",
-            "x-forwarded-for",
-            "x-forwarded-proto",
-            "x-request-id",
-            "x-real-ip",
-            "x-requested-with"
-        ]
+        self.allowed_origins = (
+            allowed_origins
+            if allowed_origins is not None
+            else [
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost:80",
+                "http://studio.unifiedediting.com",
+                "https://studio.unifiedediting.com",
+            ]
+        )
+        self.allowed_methods = (
+            allowed_methods
+            if allowed_methods is not None
+            else ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+        )
+        self.allowed_headers = (
+            allowed_headers
+            if allowed_headers is not None
+            else [
+                "accept",
+                "accept-encoding",
+                "authorization",
+                "content-type",
+                "dnt",
+                "origin",
+                "user-agent",
+                "x-csrftoken",
+                "x-forwarded-for",
+                "x-forwarded-proto",
+                "x-request-id",
+                "x-real-ip",
+                "x-requested-with",
+            ]
+        )
         self.max_age = max_age
     
-    def create_cors_middleware(self):
-        """Create CORS middleware instance"""
+    def create_cors_middleware(self, app: ASGIApp) -> CORSMiddleware:
+        """Create a CORS middleware instance for an ASGI application."""
         return CORSMiddleware(
+            app=app,
             allow_origins=self.allowed_origins,
             allow_credentials=True,
             allow_methods=self.allowed_methods,
@@ -71,8 +77,9 @@ class SecurityMiddleware:
         }
         
         # Add specific headers based on request
-        if request.headers.get("origin"):
-            headers["Access-Control-Allow-Origin"] = request.headers.get("origin")
+        origin = request.headers.get("origin")
+        if origin is not None and origin in self.allowed_origins:
+            headers["Access-Control-Allow-Origin"] = origin
             headers["Access-Control-Allow-Credentials"] = "true"
         
         return headers

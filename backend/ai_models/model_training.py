@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import logging
-from typing import Dict, Any, List, Optional, Callable
+from typing import List, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from .device_utils import get_device
@@ -47,10 +47,11 @@ class CustomModelTrainer:
     def __init__(self, config: TrainingConfig):
         self.config = config
         self.device = get_device() if config.device == "auto" else config.device
-        self.model = None
-        self.optimizer = None
-        self.scheduler = None
-        self.metrics_history = []
+        self.model: Optional[nn.Module] = None
+        self.loss_fn: Optional[nn.Module] = None
+        self.optimizer: Optional[optim.Optimizer] = None
+        self.scheduler: Optional[optim.lr_scheduler.ReduceLROnPlateau] = None
+        self.metrics_history: List[TrainingMetrics] = []
         
         # Create save directory
         Path(config.save_dir).mkdir(parents=True, exist_ok=True)
@@ -68,10 +69,21 @@ class CustomModelTrainer:
         self.loss_fn = loss_fn
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            self.optimizer, mode='min', factor=0.5, patience=5
         )
         
         logger.info(f"Model setup complete on {self.device}")
+
+    def _require_training_components(
+        self,
+    ) -> Tuple[nn.Module, nn.Module, optim.Optimizer, optim.lr_scheduler.ReduceLROnPlateau]:
+        model = self.model
+        loss_fn = self.loss_fn
+        optimizer = self.optimizer
+        scheduler = self.scheduler
+        if model is None or loss_fn is None or optimizer is None or scheduler is None:
+            raise RuntimeError("SetupModel must be called before training")
+        return model, loss_fn, optimizer, scheduler
     
     def Train(
         self,
@@ -88,6 +100,12 @@ class CustomModelTrainer:
         Returns:
             List of training metrics
         """
+        _, _, optimizer, scheduler = self._require_training_components()
+        if len(train_loader) == 0:
+            raise ValueError("Training data loader must contain at least one batch")
+        if val_loader is not None and len(val_loader) == 0:
+            raise ValueError("Validation data loader must contain at least one batch")
+
         best_val_loss = float('inf')
         patience_counter = 0
         
@@ -104,8 +122,8 @@ class CustomModelTrainer:
                 val_loss, val_acc = self._validate(val_loader)
             
             # Update learning rate
-            self.scheduler.step(val_loss if val_loss is not None else train_loss)
-            current_lr = self.optimizer.param_groups[0]['lr']
+            scheduler.step(val_loss if val_loss is not None else train_loss)
+            current_lr = optimizer.param_groups[0]['lr']
             
             # Record metrics
             metrics = TrainingMetrics(
@@ -115,7 +133,7 @@ class CustomModelTrainer:
                 val_loss=val_loss,
                 train_accuracy=train_acc,
                 val_accuracy=val_acc,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
             
             self.metrics_history.append(metrics)
@@ -128,7 +146,7 @@ class CustomModelTrainer:
             if val_loss is not None and val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                self._save_best_model(f"best_epoch_{epoch + 1}.pt")
+                self._save_best_model(f"best_epoch_{epoch + 1}.pt", val_loss)
             else:
                 patience_counter += 1
                 if patience_counter >= self.config.early_stopping_patience:
@@ -141,20 +159,23 @@ class CustomModelTrainer:
         
         return self.metrics_history
     
-    def _train_epoch(self, train_loader: torch.utils.data.DataLoader) -> tuple:
+    def _train_epoch(
+        self, train_loader: torch.utils.data.DataLoader
+    ) -> Tuple[float, float]:
         """Train for one epoch"""
-        self.model.train()
+        model, loss_fn, optimizer, _ = self._require_training_components()
+        model.train()
         total_loss = 0.0
         correct = 0
         total = 0
         
-        for batch_idx, (data, target) in enumerate(train_loader):
+        for data, target in train_loader:
             data, target = data.to(self.device), target.to(self.device)
             
             # Forward pass
-            self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = self.loss_fn(output, target)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = loss_fn(output, target)
             
             # Backward pass
             loss.backward()
@@ -162,10 +183,10 @@ class CustomModelTrainer:
             # Gradient clipping
             if self.config.gradient_clip > 0:
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.config.gradient_clip
+                    model.parameters(), self.config.gradient_clip
                 )
             
-            self.optimizer.step()
+            optimizer.step()
             
             # Track metrics
             total_loss += loss.item()
@@ -178,9 +199,12 @@ class CustomModelTrainer:
         
         return avg_loss, accuracy
     
-    def _validate(self, val_loader: torch.utils.data.DataLoader) -> tuple:
+    def _validate(
+        self, val_loader: torch.utils.data.DataLoader
+    ) -> Tuple[float, float]:
         """Validate the model"""
-        self.model.eval()
+        model, loss_fn, _, _ = self._require_training_components()
+        model.eval()
         total_loss = 0.0
         correct = 0
         total = 0
@@ -188,8 +212,8 @@ class CustomModelTrainer:
         with torch.no_grad():
             for data, target in val_loader:
                 data, target = data.to(self.device), target.to(self.device)
-                output = self.model(data)
-                loss = self.loss_fn(output, target)
+                output = model(data)
+                loss = loss_fn(output, target)
                 total_loss += loss.item()
                 _, predicted = torch.max(output.data, 1)
                 total += target.size(0)
@@ -211,24 +235,29 @@ class CustomModelTrainer:
         
         logger.info(log_msg)
     
-    def _save_best_model(self, filename: str):
+    def _save_best_model(self, filename: str, loss: float):
         """Save the best model"""
+        model, _, optimizer, _ = self._require_training_components()
+        if not self.metrics_history:
+            raise RuntimeError("Cannot save a best model before recording training metrics")
+
         torch.save({
             'epoch': self.metrics_history[-1].epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'loss': self.loss_history[-1],
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss,
         }, Path(self.config.save_dir) / filename)
         
         logger.info(f"Best model saved: {filename}")
     
     def _save_final_model(self):
         """Save the final model"""
-        final_filename = f"final_model_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pt"
+        model, _, optimizer, scheduler = self._require_training_components()
+        final_filename = f"final_model_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pt"
         torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
             'config': vars(self.config),
         }, Path(self.config.save_dir) / final_filename)
         
@@ -339,7 +368,6 @@ class ModelOptimizer:
 # Test function
 def test_training_framework():
     """Test the training framework"""
-    import numpy as np
     from torch.utils.data import TensorDataset, DataLoader
     
     # Create mock data

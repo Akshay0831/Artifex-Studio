@@ -22,6 +22,7 @@ declare namespace React {
   }
   
   export interface HTMLAttributes<T> {
+    ref?: Ref<T>;
     className?: string;
     style?: CSSProperties;
     children?: ReactNode;
@@ -30,9 +31,7 @@ declare namespace React {
     tabIndex?: number;
   }
   
-  export interface DetailedHTMLProps<T, U> extends HTMLAttributes<T> {
-    ref?: Ref<U>;
-  }
+  export type DetailedHTMLProps<T, U> = T & { ref?: Ref<U> };
   
   export interface Context<T> {
     Provider: React.Provider<T>;
@@ -49,9 +48,9 @@ declare namespace React {
     children: (value: T) => ReactNode;
   }
   
-  export type ComponentType<P = {}> = any;
-  export type ExoticComponent<P = {}> = any;
-  export type FC<P = {}> = any;
+  export type ComponentType<P extends object = object> = (props: P) => ReactNode;
+  export type ExoticComponent<P extends object = object> = (props: P) => ReactNode;
+  export type FC<P extends object = object> = (props: P) => ReactNode;
   
   // Hook types
   export type Dispatch<T> = (value: T) => void;
@@ -63,13 +62,12 @@ declare namespace React {
     readonly state: ReturnType<R>;
   }
   
-  export interface ReducerAction<R extends Reducer<any, any>> {
-    readonly type: string;
-  }
-  
-  export interface ReducerProps<R extends Reducer<any, any>> extends ReducerState<R>, ReducerAction<R> {
+  export type ReducerAction<R extends Reducer<any, any>> =
+    R extends Reducer<any, infer A> ? A : never;
+
+  export type ReducerProps<R extends Reducer<any, any>> = ReducerState<R> & {
     readonly dispatch: Dispatch<ReducerAction<R>>;
-  }
+  };
   
   // Hook functions
   export function useState<T>(initialState: T | (() => T)): [T, Dispatch<SetStateAction<T>>];
@@ -170,4 +168,4 @@ export function forwardRef<T, P>(
 ): React.ExoticComponent<P & React.RefAttributes<T>>;
 
 // React default export
-export const React: React;
+export default React;

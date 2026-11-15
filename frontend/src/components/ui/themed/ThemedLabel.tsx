@@ -1,6 +1,5 @@
 import React, { forwardRef } from 'react'
 import { cn } from '../../../lib/utils'
-import { useTheme } from '../../../core/ThemeContext'
 
 export interface ThemedLabelProps {
   children: React.ReactNode
@@ -11,7 +10,6 @@ export interface ThemedLabelProps {
 
 export const ThemedLabel = forwardRef<HTMLLabelElement, ThemedLabelProps>(
   ({ children, className, required = false, ...props }, ref) => {
-    const { isDark } = useTheme()
     
     return (
       <label

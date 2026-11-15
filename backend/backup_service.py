@@ -1,14 +1,13 @@
 import logging
-import asyncio
 import json
 import os
 import shutil
 import time
 import zipfile
-import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
+from uuid import uuid4
 from utils.base_service import BaseStudioService
 from utils.telemetry import trace_performance
 from config.config import Settings
@@ -69,10 +68,11 @@ class BackupService(BaseStudioService):
                           manual: bool = False,
                           description: str = "") -> Dict[str, Any]:
         """Create a new backup."""
+        backup_path: Optional[Path] = None
         try:
             timestamp = time.time()
-            backup_id = f"backup_{int(timestamp)}"
-            backup_name = f"backup_{datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S')}"
+            backup_id = f"backup_{uuid4().hex}"
+            backup_name = f"backup_{datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S_%f')}"
             
             if project_id:
                 # Create project-specific backup
@@ -107,6 +107,16 @@ class BackupService(BaseStudioService):
                 
                 await self._backup_system(backup_path, backup_metadata)
             
+            backup_metadata.update({
+                "manual": manual,
+                "backup_path": str(backup_path),
+                "success": True,
+                "error": None,
+            })
+            metadata_path = backup_path.with_suffix(".json")
+            with metadata_path.open("w", encoding="utf-8") as metadata_file:
+                json.dump(backup_metadata, metadata_file, indent=2, ensure_ascii=False)
+
             # Update backup history
             self.backup_history.append(backup_metadata)
             self._save_backup_history()
@@ -124,6 +134,9 @@ class BackupService(BaseStudioService):
             
         except Exception as e:
             logger.error(f"Failed to create backup: {e}")
+            if backup_path is not None:
+                backup_path.unlink(missing_ok=True)
+                backup_path.with_suffix(".json").unlink(missing_ok=True)
             return {
                 "success": False,
                 "error": str(e)
@@ -143,6 +156,7 @@ class BackupService(BaseStudioService):
             
             with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for root, dirs, files in os.walk(project_dir):
+                    dirs.sort()
                     for file in files:
                         file_path = Path(root) / file
                         arcname = file_path.relative_to(project_dir)
@@ -212,18 +226,23 @@ class BackupService(BaseStudioService):
                                         "modified": file_path.stat().st_mtime
                                     })
             
-            # Also backup configuration
-            config_files = [
-                studio_root / "config" / "settings.json",
-                studio_root / "backend" / "config.py",
-                studio_root / "frontend" / "package.json"
-            ]
-            
-            for config_file in config_files:
-                if config_file.exists():
+                # Include selected configuration files not covered by the directories above.
+                config_files = [
+                    studio_root / "config" / "settings.json",
+                    studio_root / "backend" / "config.py",
+                    studio_root / "frontend" / "package.json",
+                ]
+
+                archived_paths = set(zipf.namelist())
+                for config_file in config_files:
+                    if not config_file.exists():
+                        continue
+
                     arcname = config_file.relative_to(studio_root)
+                    if arcname.as_posix() in archived_paths:
+                        continue
+
                     zipf.write(config_file, arcname)
-                    
                     file_size = config_file.stat().st_size
                     total_size += file_size
                     file_list.append({
@@ -470,26 +489,15 @@ class BackupService(BaseStudioService):
             }
 
     async def schedule_auto_backup(self) -> Dict[str, Any]:
-        """Schedule automatic backup if needed."""
-        current_time = time.time()
-        
-        if current_time - self.last_backup_time >= self.backup_interval:
-            logger.info("Performing scheduled auto backup...")
-            result = await self.create_backup(
-                description="Automated scheduled backup"
-            )
-            if result.get("success"):
-                self.last_backup_time = current_time
-            return result
-        
+        """Report that automatic scheduling is unavailable."""
         return {
-            "success": True,
-            "message": "Auto backup not needed yet"
+            "success": False,
+            "error": "Automatic backup scheduling is not implemented.",
         }
 
     def is_auto_backup_enabled(self) -> bool:
         """Check if automatic backup is enabled."""
-        return True
+        return False
 
     def get_last_auto_backup_time(self) -> Optional[float]:
         """Get the timestamp of the last automatic backup."""
@@ -502,12 +510,17 @@ class BackupService(BaseStudioService):
 
     def get_next_scheduled_backup_time(self) -> Optional[float]:
         """Get the timestamp of the next scheduled backup."""
+        if not self.is_auto_backup_enabled():
+            return None
         next_time = self.last_backup_time + self.backup_interval
         return next_time if next_time > time.time() else None
 
     def is_auto_backup_due(self) -> bool:
         """Check if an auto backup is currently due."""
-        return time.time() - self.last_backup_time >= self.backup_interval
+        return (
+            self.is_auto_backup_enabled()
+            and time.time() - self.last_backup_time >= self.backup_interval
+        )
 
     def get_auto_backup_config(self) -> Dict[str, Any]:
         """Get automatic backup configuration."""

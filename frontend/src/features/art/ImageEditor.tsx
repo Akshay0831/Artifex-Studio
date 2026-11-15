@@ -1,17 +1,18 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Canvas, PencilBrush, FabricImage, Point } from 'fabric';
-import { 
-  Download, 
-  Undo2, 
-  Redo2, 
-  Layers, 
-  SlidersHorizontal, 
+import React, { useEffect, useRef, useState } from 'react';
+import { Canvas, PencilBrush, FabricImage, Point, Rect } from 'fabric';
+import {
+  Download,
+  Undo2,
+  Redo2,
+  Layers,
+  SlidersHorizontal,
   Image as ImageIcon,
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Hand,
-  Paintbrush
+  Paintbrush,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useStudioStore } from '../../core/useStudioStore';
@@ -28,12 +29,12 @@ const ImageEditor: React.FC = () => {
   const { yImage, yExperimental } = useStudioStore();
   const { isReviewMode, activeProposalId, proposals } = useWorktree();
 
-  const { 
-    fabricRef, 
-    activeTool, 
-    syncCanvasToYjs, 
+  const {
+    fabricRef,
+    activeTool,
+    syncCanvasToYjs,
     pushSnapshot,
-    undo, 
+    undo,
     redo,
     canUndo,
     canRedo
@@ -45,7 +46,10 @@ const ImageEditor: React.FC = () => {
   const [isSpacePanning, setIsSpacePanning] = useState<boolean>(false);
   const [isMaskMode, setIsMaskMode] = useState<boolean>(false);
   const activeToolRef = useRef(activeTool);
+  const isSpacePanningRef = useRef(isSpacePanning);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { isSpacePanningRef.current = isSpacePanning; }, [isSpacePanning]);
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
 
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     brushSize: 8,
@@ -61,14 +65,14 @@ const ImageEditor: React.FC = () => {
 
   const handleSettingsChange = (newSettings: Partial<ToolSettings>) => {
     setToolSettings(prev => ({ ...prev, ...newSettings }));
-    
+
     if (fabricRef.current && (activeTool === ToolType.BRUSH || isMaskMode) && fabricRef.current.freeDrawingBrush) {
       fabricRef.current.freeDrawingBrush.width = newSettings.brushSize || toolSettings.brushSize;
-      fabricRef.current.freeDrawingBrush.color = isMaskMode 
-        ? (newSettings.maskColor || toolSettings.maskColor) 
+      fabricRef.current.freeDrawingBrush.color = isMaskMode
+        ? (newSettings.maskColor || toolSettings.maskColor)
         : (newSettings.brushColor || toolSettings.brushColor);
     }
-    
+
     if (fabricRef.current && activeTool === ToolType.ERASER && fabricRef.current.freeDrawingBrush) {
       fabricRef.current.freeDrawingBrush.width = newSettings.eraserSize || toolSettings.eraserSize;
     }
@@ -77,24 +81,24 @@ const ImageEditor: React.FC = () => {
   // Initialize canvas
   useEffect(() => {
     if (!canvasRef.current) return;
-    
-    const c = new Canvas(canvasRef.current, { 
-      width: 512, 
-      height: 512, 
+
+    const c = new Canvas(canvasRef.current, {
+      width: 512,
+      height: 512,
       backgroundColor: '#0a0a0a',
       preserveObjectStacking: true,
       selection: true,
       defaultCursor: 'crosshair',
       hoverCursor: 'crosshair'
     });
-    
+
     fabricRef.current = c;
     setCanvas(c);
-    
+
     const pencilBrush = new PencilBrush(c);
     c.freeDrawingBrush = pencilBrush;
     c.isDrawingMode = false;
-    
+
     // History & Sync events
     const handleMutation = () => {
       syncCanvasToYjs();
@@ -109,7 +113,7 @@ const ImageEditor: React.FC = () => {
         setSelectedLayer(layerIndex !== -1 ? layerIndex : null);
       }
     };
-    
+
     c.on('object:modified', handleMutation);
     c.on('object:added', handleMutation);
     c.on('object:removed', handleMutation);
@@ -135,14 +139,14 @@ const ImageEditor: React.FC = () => {
 
     // Marquee selection dragging
     let isSelectingMarquee = false;
-    let marqueeRect: fabric.Rect | null = null;
+    let marqueeRect: Rect | null = null;
     let marqueeStartX = 0;
     let marqueeStartY = 0;
 
     c.on('mouse:down', (opt: any) => {
       const evt = opt.e;
       // Middle click (button === 1) or Spacebar held down
-      if (evt.button === 1 || evt.altKey || isSpacePanning) {
+      if (evt.button === 1 || evt.altKey || isSpacePanningRef.current) {
         isDragging = true;
         c.selection = false;
         lastPosX = evt.clientX;
@@ -155,11 +159,11 @@ const ImageEditor: React.FC = () => {
         c.selection = false;
         c.getObjects().filter((o: any) => o.isMarquee).forEach(o => c.remove(o));
 
-        const pointer = c.getPointer(opt.e);
+        const pointer = c.getScenePoint(opt.e);
         marqueeStartX = pointer.x;
         marqueeStartY = pointer.y;
 
-        marqueeRect = new fabric.Rect({
+        marqueeRect = new Rect({
           left: marqueeStartX,
           top: marqueeStartY,
           width: 0,
@@ -193,7 +197,7 @@ const ImageEditor: React.FC = () => {
       }
 
       if (isSelectingMarquee && marqueeRect) {
-        const pointer = c.getPointer(opt.e);
+        const pointer = c.getScenePoint(opt.e);
         const left = Math.min(marqueeStartX, pointer.x);
         const top = Math.min(marqueeStartY, pointer.y);
         const width = Math.abs(pointer.x - marqueeStartX);
@@ -220,7 +224,7 @@ const ImageEditor: React.FC = () => {
         c.renderAll();
       }
     });
-    
+
     // Initial snapshot
     setTimeout(() => pushSnapshot(), 200);
 
@@ -254,7 +258,7 @@ const ImageEditor: React.FC = () => {
   useEffect(() => {
     const c = fabricRef.current;
     if (!c) return;
-    
+
     if (isMaskMode) {
       c.isDrawingMode = true;
       if (c.freeDrawingBrush) {
@@ -273,7 +277,7 @@ const ImageEditor: React.FC = () => {
           c.freeDrawingBrush.color = toolSettings.brushColor;
         }
         break;
-        
+
       case ToolType.ERASER:
         c.isDrawingMode = true;
         c.selection = false;
@@ -282,19 +286,19 @@ const ImageEditor: React.FC = () => {
           c.freeDrawingBrush.color = '#0a0a0a';
         }
         break;
-        
+
       case ToolType.SELECT:
         c.isDrawingMode = false;
         c.selection = true;
         c.defaultCursor = 'default';
         break;
-        
+
       case ToolType.SELECTION:
         c.isDrawingMode = false;
         c.selection = false;
         c.defaultCursor = 'crosshair';
         break;
-        
+
       case ToolType.SHAPE:
       case ToolType.TEXT:
       case ToolType.CROP:
@@ -310,7 +314,7 @@ const ImageEditor: React.FC = () => {
   useEffect(() => {
     const c = fabricRef.current;
     if (!c) return;
-    
+
     const update = () => {
       let activeImageData = yImage?.get('baseImageData');
       let isProposalPreview = false;
@@ -326,8 +330,8 @@ const ImageEditor: React.FC = () => {
       if (activeImageData) {
         FabricImage.fromURL(`data:image/png;base64,${activeImageData}`).then(loaded => {
           c.getObjects('image').forEach(o => c.remove(o));
-          loaded.set({ 
-            selectable: false, 
+          loaded.set({
+            selectable: false,
             evented: false,
             opacity: isProposalPreview ? 0.85 : 1.0
           });
@@ -343,8 +347,8 @@ const ImageEditor: React.FC = () => {
     if (yExperimental) yExperimental.observe(update);
     update();
 
-    return () => { 
-      yImage?.unobserve(update); 
+    return () => {
+      yImage?.unobserve(update);
       if (yExperimental) yExperimental.unobserve(update);
     };
   }, [yImage, yExperimental, isReviewMode, activeProposalId, proposals, fabricRef]);
@@ -383,7 +387,7 @@ const ImageEditor: React.FC = () => {
   const handleExportImage = () => {
     const c = fabricRef.current;
     if (!c) return;
-    const dataURL = c.toDataURL({ format: 'png', quality: 1 });
+    const dataURL = c.toDataURL({ format: 'png', quality: 1, multiplier: 1 });
     const link = document.createElement('a');
     link.download = `artifex-export-${Date.now()}.png`;
     link.href = dataURL;
@@ -392,9 +396,10 @@ const ImageEditor: React.FC = () => {
   };
 
   return (
-    <div className="h-full min-h-0 min-w-0 overflow-hidden bg-studio-background">
+    <div className={`h-full w-full min-h-0 min-w-0 overflow-hidden bg-studio-background ${isFocusMode ? 'fixed inset-0 z-50' : ''}`}>
       <DockWorkspace
-        storageKey="studio-art-editor-layout:v2"
+        storageKey="studio-art-editor-panels:v1"
+        minCenterWidth={512}
         panels={[
           {
             id: 'layers',
@@ -402,25 +407,25 @@ const ImageEditor: React.FC = () => {
             icon: Layers,
             defaultZone: 'left',
             content: (
-              <LayerManager
-                canvas={canvas}
-                onLayerSelect={layer => {
-                  if (layer) setSelectedLayer(parseInt(layer.id.replace('layer-', ''), 10));
-                  else setSelectedLayer(null);
-                }}
-              />
+              <div className="h-full min-h-0 overflow-hidden">
+                <LayerManager
+                  canvas={canvas}
+                  onLayerSelect={layer => {
+                    if (layer) setSelectedLayer(parseInt(layer.id.replace('layer-', ''), 10));
+                    else setSelectedLayer(null);
+                  }}
+                />
+              </div>
             ),
           },
           {
             id: 'canvas',
-            title: 'Canvas Workspace',
+            title: 'Canvas',
             icon: ImageIcon,
             defaultZone: 'center',
             content: (
               <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-studio-background">
-                {/* Canvas Control Toolbar */}
-                <div className="flex h-11 shrink-0 items-center justify-between border-b border-studio-border bg-studio-header px-3">
-                  {/* Left: Undo/Redo & Mask Toggle */}
+                <div className="z-10 flex h-11 shrink-0 items-center justify-between border-b border-studio-border bg-studio-header px-3 shadow-sm">
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -442,32 +447,29 @@ const ImageEditor: React.FC = () => {
                     >
                       <Redo2 size={15} />
                     </button>
-
-                    <div className="w-px h-5 bg-studio-border mx-1" />
-
-                    {/* Mask Inpaint mode button */}
+                    <div className="mx-1 h-5 w-px bg-studio-border" />
                     <button
                       type="button"
+                      disabled
                       onClick={() => {
                         const next = !isMaskMode;
                         setIsMaskMode(next);
                         if (next) toast('Inpaint Mask Brush active', { icon: '🖌️' });
                       }}
-                      className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold transition-all border ${
-                        isMaskMode 
-                          ? 'bg-red-500 text-white border-red-400 shadow-sm' 
-                          : 'bg-black/30 text-studio-text-dim border-studio-border hover:bg-studio-hover hover:text-white'
+                      className={`flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-bold transition-all ${
+                        isMaskMode
+                          ? 'border-red-400 bg-red-500 text-white shadow-sm'
+                          : 'border-studio-border bg-black/30 text-studio-text-dim hover:bg-studio-hover hover:text-white'
                       }`}
-                      title="Paint an inpainting mask for AI generation"
+                      title="Image inpainting is not implemented for the configured backends."
                     >
                       <Paintbrush size={13} />
-                      <span>{isMaskMode ? 'Masking ON' : 'Inpaint Mask'}</span>
+                      <span>Inpaint Mask - Unavailable</span>
                     </button>
                   </div>
 
-                  {/* Right: Zoom controls & Export */}
                   <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-black/40 border border-studio-border rounded px-1.5 py-0.5 text-xs text-studio-text font-mono">
+                    <div className="flex items-center rounded border border-studio-border bg-black/40 px-1.5 py-0.5 font-mono text-xs text-studio-text">
                       <button
                         type="button"
                         onClick={handleZoomOut}
@@ -488,17 +490,24 @@ const ImageEditor: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleResetZoom}
-                        className="p-1 text-studio-text-dim hover:text-white transition-colors ml-1"
+                        className="ml-1 p-1 text-studio-text-dim hover:text-white transition-colors"
                         title="Reset View"
                       >
                         <RotateCcw size={12} />
                       </button>
                     </div>
-
+                    <button
+                      type="button"
+                      onClick={() => setIsFocusMode(!isFocusMode)}
+                      className="rounded-lg border border-studio-border bg-black/40 p-1.5 text-studio-text-dim hover:text-white transition-colors"
+                      title={isFocusMode ? 'Exit Canvas Focus Mode' : 'Maximize Canvas (Focus Mode)'}
+                    >
+                      {isFocusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    </button>
                     <button
                       type="button"
                       onClick={handleExportImage}
-                      className="flex items-center gap-1 bg-studio-accent hover:bg-studio-accent/80 text-white font-bold text-xs px-3 py-1.5 rounded transition-all shadow-sm"
+                      className="flex items-center gap-1 rounded bg-studio-accent px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-studio-accent/80"
                       aria-label="Export image"
                       title="Export PNG to disk"
                     >
@@ -508,10 +517,9 @@ const ImageEditor: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Viewport Canvas Center */}
-                <div 
+                <div
                   ref={containerRef}
-                  className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-studio-panel p-4 relative"
+                  className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-[#0c0c14] p-4"
                 >
                   <div className="relative flex max-h-full max-w-full items-center justify-center shadow-2xl">
                     <canvas
@@ -520,11 +528,9 @@ const ImageEditor: React.FC = () => {
                       height={512}
                       className="rounded-lg border border-studio-border bg-black shadow-inner"
                     />
-
-                    {/* Active Layer Pill */}
-                    <div className="absolute left-3 top-3 pointer-events-none rounded bg-black/70 backdrop-blur-sm px-2.5 py-1 text-[11px] font-medium text-studio-text border border-white/10 shadow-md">
+                    <div className="pointer-events-none absolute left-3 top-3 rounded border border-white/10 bg-black/70 px-2.5 py-1 text-[11px] font-medium text-studio-text shadow-md backdrop-blur-sm">
                       {isMaskMode ? (
-                        <span className="text-red-400 font-bold uppercase">Drawing Inpainting Mask</span>
+                        <span className="font-bold uppercase text-red-400">Drawing Inpainting Mask</span>
                       ) : selectedLayer !== null ? (
                         `Active: Layer ${selectedLayer + 1}`
                       ) : (
@@ -538,16 +544,18 @@ const ImageEditor: React.FC = () => {
           },
           {
             id: 'tool-options',
-            title: 'Tool Options & Filters',
+            title: 'Tool Options',
             icon: SlidersHorizontal,
             defaultZone: 'right',
             content: (
-              <EditingTools
-                canvas={canvas}
-                activeTool={activeTool as ToolType}
-                toolSettings={toolSettings}
-                onSettingsChange={handleSettingsChange}
-              />
+              <div className="h-full min-h-0 overflow-y-auto">
+                <EditingTools
+                  canvas={canvas}
+                  activeTool={activeTool as ToolType}
+                  toolSettings={toolSettings}
+                  onSettingsChange={handleSettingsChange}
+                />
+              </div>
             ),
           },
         ]}

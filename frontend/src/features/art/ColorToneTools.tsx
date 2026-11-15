@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Canvas, FabricObject } from 'fabric';
+import React, { useState, useEffect, useMemo } from 'react';
+import { FabricObject } from 'fabric';
 import { 
-  Palette, Settings, Sun, Moon, Contrast, Droplets, Activity, 
-  Sliders, BarChart3, Eye, EyeOff, Download, RotateCcw, Zap,
+  Palette, Sun, Contrast, Activity,
+  Sliders, Eye, EyeOff, RotateCcw,
   TrendingUp, Target
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -24,8 +24,6 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
   selectedLayers, 
   onAdjustmentApplied 
 }) => {
-  const { t } = { t: (key: string) => key }; // Mock translation function
-  
   const [activeAdjustment, setActiveAdjustment] = useState<AdjustmentType | null>(null);
   const [adjustments, setAdjustments] = useState<Map<AdjustmentType, number>>(new Map());
   const [colorBalance, setColorBalance] = useState<ColorBalance>({
@@ -40,7 +38,7 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
   const [showPreview, setShowPreview] = useState(true);
   const [resetConfirmation, setResetConfirmation] = useState(false);
 
-  const adjustmentDefinitions: Adjustment[] = [
+  const adjustmentDefinitions = useMemo<Adjustment[]>(() => [
     {
       id: AdjustmentType.BRIGHTNESS,
       name: 'Brightness',
@@ -150,7 +148,7 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
       icon: EyeOff,
       description: 'Adjust black point'
     }
-  ];
+  ], []);
 
   // Initialize adjustments
   useEffect(() => {
@@ -159,7 +157,7 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
       initialAdjustments.set(adj.id, adj.value);
     });
     setAdjustments(initialAdjustments);
-  }, []);
+  }, [adjustmentDefinitions]);
 
   // Apply adjustment to selected layers
   const applyAdjustment = (adjustmentId: AdjustmentType, value: number) => {
@@ -213,6 +211,7 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
             }
             break;
           case AdjustmentType.CONTRAST:
+          {
             const factor = (259 * (value + 255)) / (255 * (259 - value));
             for (let i = 0; i < data.length; i += 4) {
               data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
@@ -220,6 +219,7 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
               data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
             }
             break;
+          }
           case AdjustmentType.SATURATION:
             for (let i = 0; i < data.length; i += 4) {
               const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
@@ -392,13 +392,6 @@ const ColorToneTools: React.FC<ColorToneToolsProps> = ({
     const newPoint = { x, y, input: x, output: y };
     const newPoints = [...curvesPoints, newPoint];
     newPoints.sort((a, b) => a.x - b.x);
-    setCurvesPoints(newPoints);
-  };
-
-  // Remove curves point
-  const removeCurvesPoint = (index: number) => {
-    if (curvesPoints.length <= 2) return;
-    const newPoints = curvesPoints.filter((_, i) => i !== index);
     setCurvesPoints(newPoints);
   };
 

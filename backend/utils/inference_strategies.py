@@ -14,7 +14,7 @@ class InferenceStrategy(ABC):
         pass
 
 class LocalGPUStrategy(InferenceStrategy):
-    def __init__(self, device_type: str):
+    def __init__(self, device_type: Optional[str]):
         self.device_type = device_type
 
     def is_available(self) -> bool:

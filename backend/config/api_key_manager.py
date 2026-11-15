@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+
+logger = logging.getLogger("studio.backend.config.api_key_manager")
 
 class APIKeyProfile:
     def __init__(self, name: str, api_key: str, api_type: str = "replicate", is_active: bool = True):
@@ -10,12 +13,12 @@ class APIKeyProfile:
         self.api_key = api_key
         self.api_type = api_type.lower()
         self.is_active = is_active
-        self.models = []
-        self.default_model = None
-        self.rate_limit = 100
-        self.usage_count = 0
-        self.last_used = None
-        self.created_at = None
+        self.models: List[str] = []
+        self.default_model: Optional[str] = None
+        self.rate_limit: int = 100
+        self.usage_count: int = 0
+        self.last_used: Optional[str] = None
+        self.created_at: Optional[str] = None
         
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -68,10 +71,12 @@ class APIKeyManager:
                 # Set created_at for new profiles
                 for profile_name, profile in self.profiles.items():
                     if profile.created_at is None:
-                        profile.created_at = str(profile.usage_count)
+                        profile.created_at = datetime.datetime.now(
+                            datetime.timezone.utc
+                        ).isoformat()
                         
-            except Exception as e:
-                print(f"Error loading API config: {e}")
+            except Exception:
+                logger.exception("Failed to load API key configuration")
                 
     def save_config(self):
         try:
@@ -122,7 +127,12 @@ class APIKeyManager:
     def get_active_profiles(self) -> List[APIKeyProfile]:
         return [profile for profile in self.profiles.values() if profile.is_active]
         
-    def update_profile_models(self, profile_name: str, models: List[str], default_model: str = None) -> bool:
+    def update_profile_models(
+        self,
+        profile_name: str,
+        models: List[str],
+        default_model: Optional[str] = None,
+    ) -> bool:
         if profile_name not in self.profiles:
             return False
             
@@ -134,7 +144,9 @@ class APIKeyManager:
     def increment_usage(self, profile_name: str):
         if profile_name in self.profiles:
             self.profiles[profile_name].usage_count += 1
-            self.profiles[profile_name].last_used = str(datetime.datetime.now())
+            self.profiles[profile_name].last_used = datetime.datetime.now(
+                datetime.timezone.utc
+            ).isoformat()
             self.save_config()
             
     def remove_profile(self, profile_name: str) -> bool:
@@ -155,11 +167,11 @@ class APIKeyManager:
     def create_default_profiles(self):
         """Create default API key profiles for common APIs"""
         
-        # Replicate API
-        if os.getenv("REPLICATE_API_KEY"):
+        replicate_api_key = os.getenv("REPLICATE_API_KEY")
+        if replicate_api_key:
             self.add_profile(
                 name="Replicate",
-                api_key=os.getenv("REPLICATE_API_KEY"),
+                api_key=replicate_api_key,
                 api_type="replicate",
                 is_active=True
             )
@@ -175,10 +187,11 @@ class APIKeyManager:
             )
             
         # RunPod API
-        if os.getenv("RUNPOD_API_KEY"):
+        runpod_api_key = os.getenv("RUNPOD_API_KEY")
+        if runpod_api_key:
             self.add_profile(
                 name="RunPod",
-                api_key=os.getenv("RUNPOD_API_KEY"),
+                api_key=runpod_api_key,
                 api_type="runpod",
                 is_active=True
             )
@@ -193,10 +206,11 @@ class APIKeyManager:
             )
             
         # OpenAI API (if available)
-        if os.getenv("OPENAI_API_KEY"):
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key:
             self.add_profile(
                 name="OpenAI",
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=openai_api_key,
                 api_type="openai",
                 is_active=True
             )
@@ -215,8 +229,6 @@ class APIKeyManager:
             self.current_profile = next(iter(self.profiles.keys()))
             self.save_config()
 
-    def activate_profile(self, profile_name: str) -> bool:
-        """Activate a profile."""
     def activate_profile(self, profile_name: str) -> bool:
         """Activate a profile."""
         if profile_name in self.profiles:

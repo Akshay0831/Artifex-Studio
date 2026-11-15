@@ -1,6 +1,5 @@
 import React, { forwardRef } from 'react'
 import { cn } from '../../../lib/utils'
-import { useTheme } from '../../../core/ThemeContext'
 
 export interface ThemedBadgeProps {
   children: React.ReactNode
@@ -19,7 +18,6 @@ const variantStyles = {
 
 export const ThemedBadge = forwardRef<HTMLDivElement, ThemedBadgeProps>(
   ({ children, variant = 'default', className, ...props }, ref) => {
-    const { isDark } = useTheme()
     
     return (
       <div

@@ -45,16 +45,20 @@ class PaletteService:
         color_counts: Dict[Tuple[int, int, int], int] = {}
         for index, count in zip(indices.tolist(), counts.tolist()):
             offset = int(index) * 3
-            color = tuple(image_palette[offset:offset + 3])
+            color = (
+                int(image_palette[offset]),
+                int(image_palette[offset + 1]),
+                int(image_palette[offset + 2]),
+            )
             color_counts[color] = color_counts.get(color, 0) + int(count)
 
         ordered_colors = sorted(
-            color_counts.items(),
-            key=lambda item: (-item[1], item[0]),
+            color_counts,
+            key=lambda color: (-color_counts[color], color),
         )
         return [
             f"#{red:02X}{green:02X}{blue:02X}"
-            for (red, green, blue), _count in ordered_colors
+            for red, green, blue in ordered_colors
         ]
 
     @staticmethod
@@ -108,6 +112,10 @@ class PaletteService:
             palette_image.putpalette(palette)
             indexed_image = rgb_image.quantize(palette=palette_image, dither=dither)
         else:
+            if palette_settings.max_colors is None:
+                raise PaletteProcessingError(
+                    f"{palette_settings.mode} palette mode requires a color limit"
+                )
             indexed_image = rgb_image.quantize(
                 colors=palette_settings.max_colors,
                 method=Image.Quantize.MEDIANCUT,
@@ -129,7 +137,7 @@ class PaletteService:
                 output_colors.append(color)
 
         result_image = indexed_image.convert("RGB")
-        if preserve_alpha:
+        if preserve_alpha and alpha is not None:
             result_image.putalpha(alpha)
 
         output = io.BytesIO()

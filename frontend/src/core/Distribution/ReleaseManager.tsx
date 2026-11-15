@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  Upload, 
-  Download, 
   Tag, 
   Calendar, 
   Users, 
@@ -9,23 +7,15 @@ import {
   CheckCircle,
   AlertCircle,
   Clock,
-  ExternalLink,
   BarChart3,
   TrendingUp,
   Zap,
   Plus,
   Shield,
   Package,
-  FileText,
   Copy,
-  Eye,
-  Play,
-  Pause,
   RefreshCw,
-  ArrowUpRight,
-  Settings2,
   Monitor,
-  Smartphone,
   Server,
   Code
 } from 'lucide-react';
@@ -73,15 +63,6 @@ interface ReleaseDependency {
   version: string;
   type: 'runtime' | 'framework' | 'library';
   optional: boolean;
-}
-
-interface ReleaseVersion {
-  version: string;
-  platform: string;
-  architecture: string;
-  status: 'ready' | 'building' | 'testing' | 'deployed';
-  buildTime: Date;
-  artifact: string;
 }
 
 const ReleaseManager: React.FC = () => {
@@ -136,15 +117,6 @@ const ReleaseManager: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [newVersion, setNewVersion] = useState('1.0.1');
   const [releaseNotes, setReleaseNotes] = useState('');
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['windows', 'macos']);
-
-  const platforms = ['windows', 'macos', 'linux', 'web'];
-  const architectures = {
-    windows: ['x64', 'arm64'],
-    macos: ['x64', 'arm64'],
-    linux: ['x64', 'arm64'],
-    web: ['universal']
-  };
 
   const handleUpload = async () => {
     setIsUploading(true);
@@ -166,12 +138,6 @@ const ReleaseManager: React.FC = () => {
         ? { ...release, status: 'published' }
         : release
     ));
-  };
-
-  const generateChecksums = (artifact: ReleaseArtifact) => {
-    return {
-      [`${artifact.platform}-${artifact.architecture}`]: `sha256:${Math.random().toString(16).substr(2, 32)}`
-    };
   };
 
   const formatFileSize = (bytes: number) => {
@@ -268,8 +234,28 @@ const ReleaseManager: React.FC = () => {
               </div>
             ))}
             
+            <label className="mt-3 block px-2 text-xs text-studio-text-dim">
+              Version
+              <input
+                value={newVersion}
+                onChange={event => setNewVersion(event.target.value)}
+                className="mt-1 w-full rounded border border-studio-border bg-studio-panel px-2 py-1 text-sm text-studio-text"
+                aria-label="New release version"
+              />
+            </label>
+            <label className="mt-2 block px-2 text-xs text-studio-text-dim">
+              Release notes
+              <textarea
+                value={releaseNotes}
+                onChange={event => setReleaseNotes(event.target.value)}
+                className="mt-1 w-full rounded border border-studio-border bg-studio-panel px-2 py-1 text-sm text-studio-text"
+                aria-label="New release notes"
+                rows={3}
+              />
+            </label>
             <button
               className="w-full p-2 mt-3 bg-studio-accent text-black rounded text-sm font-medium hover:bg-studio-accent/80"
+              disabled={!newVersion.trim()}
               onClick={() => {
                 const newRelease: Release = {
                   id: `release-${Date.now()}`,

@@ -38,7 +38,7 @@ export default defineConfig({
           // Split third-party UI libraries
           'ui-vendor': ['lucide-react', 'yjs', 'tone'],
           // Split third-party CSS and utilities
-          'css-vendor': ['fabric', 'tailwindcss'],
+          'canvas-vendor': ['fabric'],
         },
       },
     },

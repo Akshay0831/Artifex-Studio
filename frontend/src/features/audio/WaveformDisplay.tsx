@@ -1,12 +1,12 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ZoomIn, ZoomOut, Play, Pause, Scissors, Volume2 } from 'lucide-react';
-import * as Tone from 'tone';
+import React, { useRef, useEffect, useState } from 'react';
+import { ZoomIn, ZoomOut, Volume2 } from 'lucide-react';
 
 interface WaveformDisplayProps {
   currentStep: number;
   isPlaying: boolean;
   totalSteps?: number;
   channelNames?: string[];
+  channelColors?: string[];
   activeChannel?: number;
   onSeekStep?: (step: number) => void;
   audioBuffer?: AudioBuffer | null;
@@ -17,42 +17,13 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
   isPlaying,
   totalSteps = 32,
   channelNames = ['Bass Synth', 'Lead Melody', 'Percussion', 'Atmosphere'],
+  channelColors,
   activeChannel = 0,
   onSeekStep,
   audioBuffer
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState<number>(1);
-  const [selectedRegion, setSelectedRegion] = useState<{ start: number; end: number } | null>(null);
-
-  // Generate synthetic waveform peaks if audioBuffer is not provided
-  const generateSyntheticPeaks = useCallback((channelIdx: number, sampleCount: number) => {
-    const peaks = new Float32Array(sampleCount);
-    const seed = (channelIdx + 1) * 31.415;
-    for (let i = 0; i < sampleCount; i++) {
-      const stepIdx = Math.floor((i / sampleCount) * totalSteps);
-      const isKickBeat = stepIdx % 4 === 0;
-      const isSnareBeat = stepIdx % 8 === 4;
-      const t = i / 10;
-      let amp = Math.sin(t * (channelIdx + 1) * 0.4) * 0.4;
-      if (channelIdx === 2) {
-        // Percussion channel
-        amp = (isKickBeat ? 0.9 : isSnareBeat ? 0.7 : 0.15) * Math.sin(t * 2);
-      } else if (channelIdx === 0) {
-        // Bass
-        amp = 0.6 * Math.sin(t * 0.15 + seed) * (stepIdx % 2 === 0 ? 0.9 : 0.3);
-      } else if (channelIdx === 1) {
-        // Lead
-        amp = 0.5 * Math.sin(t * 0.8) * Math.cos(t * 0.2);
-      } else {
-        // Atmosphere
-        amp = 0.35 * Math.sin(t * 0.05 + seed);
-      }
-      peaks[i] = Math.max(-1, Math.min(1, amp));
-    }
-    return peaks;
-  }, [totalSteps]);
 
   // Render canvas
   useEffect(() => {
@@ -116,16 +87,16 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
       ctx.stroke();
 
       // Track label
-      ctx.fillStyle = chIdx === activeChannel ? '#818cf8' : '#64748b';
+      const defaultColors = ['#6366f1', '#38bdf8', '#ec4899', '#10b981', '#f59e0b', '#a855f7'];
+      const labelColor = (channelColors && channelColors[chIdx]) || defaultColors[chIdx % defaultColors.length];
+      ctx.fillStyle = chIdx === activeChannel ? labelColor : '#64748b';
       ctx.font = 'bold 9px sans-serif';
       ctx.fillText(name.toUpperCase(), 8, trackTop + 14);
 
-      // Extract or compute audio peaks
-      let peaks: Float32Array;
+      const peaks = new Float32Array(width);
       if (audioBuffer && chIdx === activeChannel) {
         const channelData = audioBuffer.getChannelData(0);
         const samplesPerPixel = Math.floor(channelData.length / width);
-        peaks = new Float32Array(width);
         for (let x = 0; x < width; x++) {
           let max = 0;
           const start = x * samplesPerPixel;
@@ -136,12 +107,10 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
           }
           peaks[x] = max;
         }
-      } else {
-        peaks = generateSyntheticPeaks(chIdx, width);
       }
 
       // Draw Waveform
-      const trackColor = chIdx === 0 ? '#6366f1' : chIdx === 1 ? '#38bdf8' : chIdx === 2 ? '#ec4899' : '#10b981';
+      const trackColor = (channelColors && channelColors[chIdx]) || defaultColors[chIdx % defaultColors.length];
       ctx.fillStyle = trackColor;
       ctx.strokeStyle = trackColor;
       ctx.lineWidth = 1;
@@ -159,16 +128,6 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
       ctx.lineTo(width, trackCenter);
       ctx.stroke();
     });
-
-    // Selected region overlay
-    if (selectedRegion) {
-      const startX = (selectedRegion.start / totalSteps) * width;
-      const endX = (selectedRegion.end / totalSteps) * width;
-      ctx.fillStyle = 'rgba(99, 102, 241, 0.18)';
-      ctx.fillRect(startX, 18, endX - startX, height - 18);
-      ctx.strokeStyle = '#6366f1';
-      ctx.strokeRect(startX, 18, endX - startX, height - 18);
-    }
 
     // Playhead Line
     const playheadX = (currentStep / totalSteps) * width;
@@ -188,7 +147,7 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
     ctx.closePath();
     ctx.fill();
 
-  }, [currentStep, totalSteps, channelNames, activeChannel, zoom, selectedRegion, audioBuffer, generateSyntheticPeaks]);
+  }, [currentStep, totalSteps, channelNames, channelColors, activeChannel, zoom, audioBuffer]);
 
   // Handle Timeline Scrubbing
   const handleTimelineClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -210,7 +169,10 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-bold tracking-wider uppercase text-studio-accent font-mono flex items-center gap-1.5">
             <Volume2 size={12} />
-            MULTI-TRACK AUDIO TIMELINE & WAVEFORM
+            MIDI TIMELINE & AUDIO WAVEFORM
+          </span>
+          <span className={`text-[9px] font-mono ${isPlaying ? 'text-emerald-400' : 'text-studio-text-dim'}`} aria-live="polite">
+            {isPlaying ? 'PLAYING' : 'STOPPED'}
           </span>
           <span className="text-[9px] font-mono text-studio-text-dim">
             32 STEPS • 2 BARS (4/4) • 16TH NOTES
@@ -237,20 +199,11 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
           >
             <ZoomIn size={12} />
           </button>
-          {selectedRegion && (
-            <button
-              type="button"
-              onClick={() => setSelectedRegion(null)}
-              className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/60 text-red-300 border border-red-800"
-            >
-              Clear Loop
-            </button>
-          )}
         </div>
       </div>
 
       {/* Waveform Canvas Area */}
-      <div ref={containerRef} className="flex-1 relative overflow-x-auto custom-scrollbar bg-black/80">
+      <div className="flex-1 relative overflow-x-auto custom-scrollbar bg-black/80">
         <canvas
           ref={canvasRef}
           width={800 * zoom}
@@ -258,6 +211,11 @@ export const WaveformDisplay: React.FC<WaveformDisplayProps> = ({
           onClick={handleTimelineClick}
           className="cursor-crosshair w-full h-full block"
         />
+        {!audioBuffer && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 px-4 text-center text-xs text-studio-text-dim">
+            Waveform preview unavailable: this MIDI pattern has not been rendered to audio.
+          </div>
+        )}
       </div>
     </div>
   );

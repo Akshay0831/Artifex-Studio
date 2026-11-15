@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Layers, Brush, Eraser, Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
 
-import { useScalableLayout } from '../../components/layout/ScalableLayout';
+import { useScalableLayout } from '../../components/layout/ScalableLayoutContext';
 
 interface MaskLayer {
   id: string;

@@ -1,4 +1,3 @@
-import pytest
 import asyncio
 import base64
 import io
@@ -13,6 +12,22 @@ from config.api_key_manager import api_key_manager
 
 
 client = TestClient(app)
+
+
+def test_inpaint_route_returns_not_implemented():
+    response = client.post(
+        "/api/art/inpaint",
+        json={
+            "base_image": "base",
+            "mask_image": "mask",
+            "prompt": "replace the masked area",
+        },
+    )
+
+    assert response.status_code == 501
+    assert response.json()["detail"] == (
+        "Image inpainting is not implemented for the configured backends."
+    )
 
 
 def test_art_route_validates_and_forwards_palette_options(monkeypatch):

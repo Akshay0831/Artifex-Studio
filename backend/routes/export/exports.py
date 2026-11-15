@@ -1,18 +1,20 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
 import json
+import logging
 import time
 import zipfile
-import io
 from pathlib import Path
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.config import Settings
-settings = Settings()
+from typing import List, Optional
 
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from config.config import Settings
+
+logger = logging.getLogger("studio.backend.routes.exports")
+settings = Settings()
 router = APIRouter(prefix="/exports", tags=["exports"])
+
 
 # Request/Response Models
 class ExportRequest(BaseModel):
@@ -34,106 +36,108 @@ class ExportResponse(BaseModel):
 @router.post("/{project_id}/{format}")
 async def export_project(
     project_id: str,
+    format: str,
     export_request: ExportRequest
 ):
-    """Export project in various formats"""
+    """Package project files matching the requested format into a downloadable ZIP."""
     try:
-        # Verify project exists
-        project_dir = Path(settings.PROJECTS_PATH) / project_id
-        if not project_dir.exists():
+        if format.lower() != export_request.format.lower():
+            raise HTTPException(
+                status_code=422,
+                detail="The path format must match the request format",
+            )
+
+        projects_root = Path(settings.PROJECTS_PATH).resolve()
+        project_dir = (projects_root / project_id).resolve()
+        if not project_dir.is_relative_to(projects_root):
+            raise HTTPException(status_code=400, detail="Invalid project id")
+        if not project_dir.is_dir():
             raise HTTPException(status_code=404, detail="Project not found")
-        
-        timestamp = int(time.time())
-        export_path = Path(settings.OUTPUT_PATH) / "exports" / f"{project_id}_export_{timestamp}"
+
+        timestamp = time.time_ns()
+        export_root = (Path(settings.OUTPUT_PATH) / "exports").resolve()
+        export_path = (export_root / f"{project_id}_export_{timestamp}").resolve()
+        if not export_path.is_relative_to(export_root):
+            raise HTTPException(status_code=400, detail="Invalid project id")
+        project_files = [path for path in project_dir.rglob("*") if path.is_file()]
+        if export_request.format.lower() != "zip":
+            supported_formats = {
+                item.strip().lower().lstrip(".")
+                for item in export_request.format.split(",")
+                if item.strip()
+            }
+            project_files = [
+                path for path in project_files
+                if path.suffix.lower().lstrip(".") in supported_formats
+            ]
+            if not project_files:
+                raise HTTPException(
+                    status_code=422,
+                    detail="No project files match the requested export format",
+                )
+
         export_path.mkdir(parents=True, exist_ok=True)
-        
-        if export_request.format.lower() == "zip":
-            # Create ZIP archive
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                for file_path in project_dir.rglob('*'):
-                    if file_path.is_file():
-                        zip_file.write(file_path, file_path.relative_to(project_dir))
-                
-                # Add metadata
-                metadata = {
-                    "project_id": project_id,
-                    "export_config": export_request.dict(),
-                    "timestamp": timestamp,
-                    "format": "zip",
-                    "total_files": len(list(project_dir.rglob('*')))
-                }
-                zip_file.writestr("metadata.json", json.dumps(metadata, indent=2))
-            
-            zip_buffer.seek(0)
-            return ExportResponse(
-                format="zip",
-                files=[{"name": f"{project_id}_export_{timestamp}.zip", "size": len(zip_buffer.getvalue())}],
-                count=1,
-                download_url=f"/api/exports/download/{project_id}_{timestamp}",
-                size=len(zip_buffer.getvalue()),
-                metadata=metadata
-            )
-        
-        else:
-            # For single format exports, filter files by format
-            files = []
-            supported_formats = export_request.format.lower().split(',')
-            
-            for file_path in project_dir.rglob('*'):
-                if file_path.is_file():
-                    file_ext = file_path.suffix.lower().lstrip('.')
-                    if file_ext in supported_formats:
-                        files.append({
-                            "name": file_path.name,
-                            "size": file_path.stat().st_size,
-                            "path": str(file_path.relative_to(project_dir)),
-                            "format": file_ext
-                        })
-            
-            return ExportResponse(
-                format=export_request.format,
-                files=files,
-                count=len(files),
-                download_url=f"/api/exports/download/{project_id}_{timestamp}"
-            )
-            
+        zip_path = export_path / f"{project_id}_export_{timestamp}.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for file_path in project_files:
+                archive.write(file_path, file_path.relative_to(project_dir))
+            metadata = {
+                "project_id": project_id,
+                "export_config": export_request.model_dump(),
+                "timestamp": timestamp,
+                "format": export_request.format,
+                "total_files": len(project_files),
+            }
+            archive.writestr("metadata.json", json.dumps(metadata, indent=2))
+
+        file_metadata = [
+            {
+                "name": file_path.name,
+                "size": file_path.stat().st_size,
+                "path": str(file_path.relative_to(project_dir)),
+                "format": file_path.suffix.lower().lstrip("."),
+            }
+            for file_path in project_files
+        ]
+        return ExportResponse(
+            format=export_request.format,
+            files=file_metadata,
+            count=len(project_files),
+            download_url=f"/api/exports/download/{project_id}_{timestamp}",
+            size=zip_path.stat().st_size,
+            metadata=metadata,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception("Project export failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download/{project_id}_{timestamp}")
 async def download_export(project_id: str, timestamp: str):
     """Download export files"""
     try:
-        export_path = Path(settings.OUTPUT_PATH) / "exports" / f"{project_id}_export_{timestamp}"
-        
-        if not export_path.exists():
+        exports_root = (Path(settings.OUTPUT_PATH) / "exports").resolve()
+        export_path = (
+            exports_root / f"{project_id}_export_{timestamp}"
+        ).resolve()
+        if not export_path.is_relative_to(exports_root):
+            raise HTTPException(status_code=400, detail="Invalid export id")
+        if not export_path.is_dir():
             raise HTTPException(status_code=404, detail="Export not found")
-        
-        # For ZIP files, return the ZIP
+
         zip_file = export_path / f"{project_id}_export_{timestamp}.zip"
-        if zip_file.exists():
-            return FileResponse(
-                path=str(zip_file),
-                filename=f"{project_id}_export_{timestamp}.zip",
-                media_type="application/zip"
-            )
-        
-        # For other formats, create a temporary ZIP
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for file_path in export_path.rglob('*'):
-                if file_path.is_file():
-                    zip_file.write(file_path, file_path.relative_to(export_path))
-        
-        zip_buffer.seek(0)
-        return {
-            "content": zip_buffer.getvalue(),
-            "filename": f"{project_id}_export_{timestamp}.zip",
-            "media_type": "application/zip"
-        }
-        
+        if not zip_file.is_file():
+            raise HTTPException(status_code=404, detail="Export archive not found")
+        return FileResponse(
+            path=str(zip_file),
+            filename=zip_file.name,
+            media_type="application/zip",
+        )
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception("Export download failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("")

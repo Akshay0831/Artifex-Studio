@@ -1,13 +1,18 @@
 import asyncio
 import logging
-from typing import Any, Callable, TypeVar
-from datetime import datetime, timedelta
+from typing import Any, Awaitable, Callable, Optional, TypeVar
+from datetime import datetime
 
 logger = logging.getLogger("studio.backend.timeout")
 
 T = TypeVar('T')
 
-async def async_with_timeout(coro, timeout_seconds, default_value=None, timeout_error="Timeout") -> T:
+async def async_with_timeout(
+    coro: Awaitable[T],
+    timeout_seconds: float,
+    default_value: Optional[T] = None,
+    timeout_error: str = "Timeout",
+) -> T:
     try:
         return await asyncio.wait_for(coro, timeout=timeout_seconds)
     except asyncio.TimeoutError:
@@ -28,7 +33,11 @@ def timeout_context(timeout_seconds, error_message="Timeout"):
             return self
             
         def __exit__(self, exc_type, exc_val, exc_tb):
-            elapsed = (datetime.now() - self._start_time).total_seconds()
+            start_time = self._start_time
+            if start_time is None:
+                raise RuntimeError("Timeout context was exited before it was entered")
+
+            elapsed = (datetime.now() - start_time).total_seconds()
             if elapsed > self._timeout:
                 logger.warning(f"{self._error_message} after {elapsed:.2f} seconds")
                 raise TimeoutError(f"{self._error_message} after {elapsed:.2f} seconds")
@@ -36,8 +45,15 @@ def timeout_context(timeout_seconds, error_message="Timeout"):
     
     return TimeoutContext()
 
-async def async_run_with_timeout(func, *args, timeout_seconds=None, default_value=None, **kwargs) -> T:
+async def async_run_with_timeout(
+    func: Callable[..., Awaitable[T]],
+    *args: Any,
+    timeout_seconds: Optional[float] = None,
+    default_value: Optional[T] = None,
+    **kwargs: Any,
+) -> T:
     async def run_func():
         return await func(*args, **kwargs)
     
-    return await async_with_timeout(run_func(), timeout_seconds or 30, default_value)
+    timeout = timeout_seconds if timeout_seconds is not None else 30
+    return await async_with_timeout(run_func(), timeout, default_value)

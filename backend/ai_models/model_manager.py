@@ -6,36 +6,32 @@ Real working implementation using diffusers and transformers
 import torch
 import logging
 from typing import Optional, Dict, Any, List, Union
-from diffusers import (
-    DiffusionPipeline, 
-    StableDiffusionXLPipeline,
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
     StableDiffusionPipeline,
-    FluxPipeline
 )
-from PIL import Image
-import numpy as np
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import (
+    StableDiffusionXLPipeline,
+)
 
-from .device_utils import DeviceUtils, get_device_utils, get_device
+from .device_utils import DeviceUtils
 from .model_types import ModelType, QuantizationType, get_model_type
 
 logger = logging.getLogger(__name__)
 
 # Global instances
-_device_utils = None
-_model_manager = None
+_device_utils: Optional[DeviceUtils] = None
+_model_manager: Optional["ModelManager"] = None
 
-def get_device_utils():  # Forward reference to DeviceUtils
+def get_device_utils() -> DeviceUtils:
     """Get global device utils instance"""
     global _device_utils
     if _device_utils is None:
         _device_utils = DeviceUtils()
     return _device_utils
 
-def get_device() -> str:
-    """Get current device"""
-    return get_device_utils().get_device()
-
-def get_model_manager():  # Forward reference to ModelManager
+def get_model_manager() -> "ModelManager":
     """Get global model manager instance to avoid multiple loads"""
     global _model_manager
     if _model_manager is None:
@@ -65,20 +61,22 @@ class ModelManager:
                 "class": StableDiffusionXLPipeline,
                 "default_steps": 30,
                 "default guidance": 7.5,
-                "supports_inpaint": True
             },
             ModelType.SD15.value: {
                 "class": StableDiffusionPipeline,
                 "default_steps": 30,
                 "default guidance": 7.5,
-                "supports_inpaint": True
             },
             ModelType.FLUX.value: {
                 "class": FluxPipeline,
                 "default_steps": 50,
                 "default guidance": 7.0,
-                "supports_inpaint": False  # Flux may not support inpainting yet
-            }
+            },
+            ModelType.STABLE_DIFFUSION.value: {
+                "class": StableDiffusionPipeline,
+                "default_steps": 30,
+                "default guidance": 7.5,
+            },
         }
     
     def GetPipeline(
@@ -105,8 +103,17 @@ class ModelManager:
         if isinstance(quantization, str):
             quantization = QuantizationType(quantization)
         
+        if pipeline_type != "txt2img":
+            raise NotImplementedError(
+                f"Pipeline type {pipeline_type!r} is not implemented."
+            )
+        if quantization is not QuantizationType.NONE:
+            raise NotImplementedError(
+                f"Quantization type {quantization.value!r} is not implemented."
+            )
+
         # Create cache key
-        cache_key = f"{model_type.value}_{pipeline_type}_{quantization.value}"
+        cache_key = model_type.value
         
         # Check if we have a cached pipeline and enough memory
         if cache_key in self._pipelines:
@@ -121,7 +128,7 @@ class ModelManager:
                     logger.info("Low memory detected, clearing pipeline cache")
                     self.clear_cache()
                     # Load fresh pipeline
-                    return self._load_pipeline(model_type, pipeline_type, quantization)
+                    return self._load_pipeline(model_type)
                 else:
                     logger.debug(f"Using cached pipeline: {cache_key}")
                     return self._pipelines[cache_key]
@@ -131,7 +138,7 @@ class ModelManager:
         
         # Load new pipeline
         logger.info(f"Loading pipeline: {cache_key}")
-        pipeline = self._load_pipeline(model_type, pipeline_type, quantization)
+        pipeline = self._load_pipeline(model_type)
         
         # Cache the pipeline but limit to 1 pipeline to save memory
         if len(self._pipelines) >= 1:
@@ -146,10 +153,8 @@ class ModelManager:
         return pipeline
     
     def _load_pipeline(
-        self, 
-        model_type: ModelType, 
-        pipeline_type: str,
-        quantization: QuantizationType
+        self,
+        model_type: ModelType,
     ) -> DiffusionPipeline:
         """Load a specific pipeline"""
         config = self._model_configs.get(model_type.value)
@@ -172,16 +177,11 @@ class ModelManager:
                 torch.cuda.empty_cache()
                 gc.collect()
             
-            if model_type == ModelType.FLUX:
-                pipeline = FluxPipeline.from_pretrained(
-                    model_id,
-                    torch_dtype=torch.float16 if self.device_type == "cuda" else torch.float32
-                )
-            else:
-                pipeline = StableDiffusionXLPipeline.from_pretrained(
-                    model_id,
-                    torch_dtype=torch.float16 if self.device_type == "cuda" else torch.float32
-                )
+            pipeline_class = config["class"]
+            pipeline = pipeline_class.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16 if self.device_type == "cuda" else torch.float32,
+            )
             # Enable model CPU offload for memory optimization
             # This automatically manages device placement for all components
             # including tokenizers, so we don't need to manually move the pipeline
@@ -209,10 +209,13 @@ class ModelManager:
         model_map = {
             ModelType.SDXL: "stabilityai/stable-diffusion-xl-base-1.0",
             ModelType.SD15: "runwayml/stable-diffusion-v1-5",
-            ModelType.FLUX: "black-forest-labs/FLUX.1-schnell"
+            ModelType.FLUX: "black-forest-labs/FLUX.1-schnell",
+            ModelType.STABLE_DIFFUSION: "runwayml/stable-diffusion-v1-5",
         }
-        
-        return model_map.get(model_type, ModelType.SDXL)
+        try:
+            return model_map[model_type]
+        except KeyError as error:
+            raise ValueError(f"Unsupported model type: {model_type}") from error
     
     def get_cached_pipelines(self) -> List[str]:
         """Get list of cached pipeline keys"""
@@ -236,57 +239,22 @@ class ModelManager:
         
         # Add pipeline cache info
         cache_size = len(self._pipelines)
-        cache_memory = 0
+        cache_memory_bytes = 0
         for pipeline in self._pipelines.values():
-            try:
-                # Estimate memory usage (rough approximation)
-                param_count = sum(p.numel() for p in pipeline.parameters())
-                cache_memory += param_count * 4 / 1024**3  # 4 bytes per parameter, convert to GB
-            except:
-                pass
+            for component in pipeline.components.values():
+                if isinstance(component, torch.nn.Module):
+                    cache_memory_bytes += sum(
+                        parameter.numel() * parameter.element_size()
+                        for parameter in component.parameters()
+                    )
         
         return {
             **memory_info,
             "cached_pipelines": cache_size,
-            "estimated_cache_gb": round(cache_memory, 2)
+            "estimated_cache_gb": round(cache_memory_bytes / 1024**3, 2)
         }
     
     def __del__(self):
         """Cleanup when destroyed"""
-        self.clear_cache()
-
-# Test function
-def test_model_manager():
-    """Test the ModelManager implementation"""
-    print("Testing ModelManager...")
-    
-    try:
-        mm = ModelManager()
-        print(f"Device: {mm.device}")
-        print(f"Memory: {mm.get_memory_usage()}")
-        
-        # Test pipeline creation
-        pipeline = mm.GetPipeline("sdxl")
-        print("✅ Pipeline creation successful")
-        
-        # Test generation
-        with torch.no_grad():
-            result = pipeline(
-                prompt="A test image",
-                num_inference_steps=5,  # Quick test
-                guidance_scale=7.5
-            )
-            
-            if hasattr(result, 'images') and len(result.images) > 0:
-                print(f"✅ Generation successful: {len(result.images)} images")
-                return True
-            else:
-                print("❌ Generation failed: no images returned")
-                return False
-                
-    except Exception as e:
-        print(f"❌ ModelManager test failed: {e}")
-        return False
-
-if __name__ == "__main__":
-    test_model_manager()
+        if hasattr(self, "_pipelines"):
+            self.clear_cache()

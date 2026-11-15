@@ -19,10 +19,14 @@ Artifex Studio is a local-first creative studio with a React/TypeScript frontend
 - **Portable projects**: Export/import bundles containing project metadata, original reference assets, and per-project Yjs editor state
 - **Local references**: Image/audio references can be uploaded, previewed, and reused from the Art and Audio sidebars
 - **Local text models**: Discover installed Ollama or LM Studio models, configure a loopback endpoint and temperature, and use the selected model for Art prompt refinement
+- **Dockable workspace**: Shell panels and Art Canvas/Layers/Tool Options can be dragged between docks, stacked as tabs, collapsed, resized, and persisted independently
+- **Local MIDI templates**: Deterministic, editable MIDI patterns are available; they are not AI-generated, reference-conditioned, or rendered audio
 
 ## Workspace appearance and layout
 - Theme mode (light, dark, or system), accent, spacing, density, corner radius, and motion settings are persisted locally and configured together in **Theme Settings**. The setting controls the studio theme tokens, spacing utilities, and rem-based sizing; some feature-specific styles still need further tokenization.
-- The controls, editor, and history/activity panels can be dragged between left, center, and right docks, stacked as tabs, collapsed, and resized. Their arrangement and widths persist in browser storage; **Reset panel layout** restores the default workspace. Art/Audio control sections and activity sections can also be reordered or collapsed. Labels disappear when a panel is too narrow to show them, with full names available through tooltips and accessibility labels.
+- The controls, editor, and history/activity panels can be dragged between left, center, and right docks, stacked as tabs, collapsed, and resized. The shell's side docks start collapsed to give the active editor room; users can expand them at any time. Their arrangement and widths persist in browser storage; **Reset panel layout** restores the default workspace. Art/Audio control sections and activity sections can also be reordered or collapsed. Labels disappear when a panel is too narrow to show them, with full names available through tooltips and accessibility labels.
+- Inside Art Studio, Canvas, Layers, and Tool Options are a second, independent dock workspace. Its side widths adapt to the available editor space, and its widths and panel arrangement persist separately from the outer studio docks. Audio's arranger/mixer and MIDI/effects/waveform inspector remain integrated views rather than independently dockable panels.
+- Audio pattern tools generate deterministic local MIDI templates and rule-based chords from editable notes. They do not call an AI model, analyze references, or render audio; the waveform inspector now reports when no rendered audio buffer is available instead of showing synthetic peaks. The backend still reports audio composition as unavailable.
 - Ollama and LM Studio profiles discover installed models from loopback runtimes and currently support text inference only. Selecting a local profile enables real text-model refinement of Art prompts; without one, the existing prompt expander only appends built-in style terms. Local models do not generate or condition images, compose audio, or analyze references. Audio text-model workflows remain future work.
 - The frontend uses same-origin HTTP and WebSocket requests by default (including the Vite development proxy); set `VITE_API_BASE_URL` or `VITE_WS_URL` only to use a separate backend origin. Image/audio generation requires the backend WebSocket transport. The status indicator distinguishes an available HTTP health endpoint from a disconnected/missing WebSocket runtime.
 
@@ -79,13 +83,10 @@ The Linux alpha bundle uses CPU-only PyTorch to stay below GitHub's per-file rel
 
 ```
 artifex-studio/
-├── frontend/         # React/TypeScript frontend
-├── backend/          # Python backend with AI services
-├── backend/         # FastAPI services and tests
-├── frontend/        # React/TypeScript application
-├── scripts/         # Deployment and utility scripts
-├── docs/            # Project documentation
-└── data/            # Runtime project, model, and output data
+├── frontend/         # React/TypeScript application
+├── backend/          # FastAPI services and tests
+├── scripts/          # Deployment and utility scripts
+└── docs/             # Documentation build output (ignored by Git)
 ```
 
 ## Development
@@ -100,22 +101,30 @@ npm run dev
 ```
 
 ### Backend Setup
-```bash
-cd backend
-pip install -r requirements.txt
-python app.py
-```
+After running the platform setup script, run these commands from `backend/` so the server uses the configured virtual environment (including its WebSocket dependencies):
+
+- **Windows**: `..\.venv\Scripts\python.exe -m pip install -r requirements.txt`, then `..\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000`
+- **macOS/Linux**: `../.venv/bin/python -m pip install -r requirements.txt`, then `../.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000`
 
 The frontend development server runs on port 3000 and the backend on port 8000. For source installs, run `python setup.py` from the repository root, then use the platform launcher above. Native release bundles are published on the GitHub prereleases page after a successful `main` workflow.
 
 ### Alpha validation
+Run from the repository root after setting up the project virtual environment:
+
+```powershell
+# Windows
+.\.venv\Scripts\python.exe -m compileall -q backend
+.\.venv\Scripts\python.exe -m pytest backend\tests
+npm --prefix frontend ci
+npm --prefix frontend run build
+```
+
 ```bash
-cd backend
-python -m compileall -q .
-python -m pytest tests
-cd ../frontend
-npm ci
-npm run build
+# macOS/Linux
+./.venv/bin/python -m compileall -q backend
+./.venv/bin/python -m pytest backend/tests
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
 

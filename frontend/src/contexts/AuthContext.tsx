@@ -1,20 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-
-interface AuthContextType {
-  isAuthenticated: boolean;
-  user: any;
-  login: (user: any) => void;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType>({
-  isAuthenticated: false,
-  user: null,
-  login: () => {},
-  logout: () => {},
-});
-
-export const useAuth = () => useContext(AuthContext);
+import React, { useState, type ReactNode } from 'react';
+import { AuthContext } from './AuthContextValue';
 
 interface AuthProviderProps {
   children: ReactNode;

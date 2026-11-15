@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  Download, 
   CheckCircle, 
   XCircle, 
   Clock,
@@ -8,22 +7,12 @@ import {
   Package,
   Shield,
   Monitor,
-  Smartphone,
   Globe,
-  FileText,
-  Zap,
   Box,
   Users,
-  Settings,
   RefreshCw,
-  BarChart3,
-  Layers,
-  Play,
-  Pause,
   ArrowRight,
   ArrowLeft,
-  Check,
-  ExternalLink
 } from 'lucide-react';
 
 interface InstallationStep {
@@ -221,7 +210,7 @@ const AppInstaller: React.FC = () => {
     telemetry: false
   });
 
-  const [currentStep, setCurrentStep] = useState(0);
+  const currentStep = installerState.currentStep;
   const [selectedInstallPath, setSelectedInstallPath] = useState(installerState.installPath);
 
   const getStepIcon = (status: string, stepIndex: number) => {
@@ -301,7 +290,7 @@ const AppInstaller: React.FC = () => {
   };
 
   const startInstallation = async () => {
-    setCurrentStep(4);
+    setInstallerState(prev => ({ ...prev, currentStep: 4 }));
     await simulateInstallation();
   };
 
@@ -317,7 +306,7 @@ const AppInstaller: React.FC = () => {
 
   const changeStep = (stepIndex: number) => {
     if (stepIndex >= 0 && stepIndex < installerState.steps.length) {
-      setCurrentStep(stepIndex);
+      setInstallerState(prev => ({ ...prev, currentStep: stepIndex }));
     }
   };
 
@@ -612,7 +601,7 @@ const AppInstaller: React.FC = () => {
               </div>
               <div className="w-full bg-studio-border rounded-full h-2 mb-2">
                 <div 
-                  className="bg-studio-accent h-2 rounded-full transition-all"
+                    className={`${getProgressColor(installerState.steps[4].status)} h-2 rounded-full transition-all`}
                   style={{ width: `${installerState.steps[4].progress}%` }}
                 />
               </div>
@@ -671,7 +660,7 @@ const AppInstaller: React.FC = () => {
 
             <div className="mt-6 flex justify-between">
               <button
-                onClick={() => changeStep(4)}
+                onClick={startInstallation}
                 className="px-4 py-2 bg-studio-hover rounded text-studio-text hover:bg-studio-hover/80"
               >
                 Back

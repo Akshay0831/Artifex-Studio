@@ -1,9 +1,8 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.requests import Request
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
 from config.config import Settings
 settings = Settings()
 from routes import art, audio, backup, scaling, config, api_management_router, projects_router, exports_router, templates_router
@@ -21,11 +20,9 @@ from utils.monitoring import (
     REQUESTS_CACHE
 )
 from utils.error_handling import (
-    custom_exception_handler,
-    create_error_response
+    custom_exception_handler
 )
 from utils.api_error_handler import APIError, create_error_response as create_api_error_response
-from utils.rate_limiter import rate_limit_middleware
 from utils.monitoring import LoggingMiddleware, health_monitor, REQUESTS_CACHE
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
@@ -49,13 +46,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger("studio.backend.app")
 
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    if not websocket_protocol_available():
+        logger.error(
+            "WebSocket transport is unavailable. Install backend requirements; "
+            "generation requires a WebSocket protocol implementation."
+        )
+    status_task = asyncio.create_task(broadcast_status_loop())
+    try:
+        yield
+    finally:
+        status_task.cancel()
+        try:
+            await status_task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
     title="Unified Editing Studio API",
     description="Interactive backend for real-time sprite and music generation",
     version=APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=app_lifespan,
 )
 
 # Add middleware in order
@@ -101,15 +117,6 @@ async def broadcast_status_loop():
         except Exception:
             pass
         await asyncio.sleep(5)
-
-@app.on_event("startup")
-async def startup_event():
-    if not websocket_protocol_available():
-        logger.error(
-            "WebSocket transport is unavailable. Install backend requirements; "
-            "generation requires a WebSocket protocol implementation."
-        )
-    asyncio.create_task(broadcast_status_loop())
 
 app.include_router(art.router, prefix="/api")
 app.include_router(audio.router, prefix="/api")

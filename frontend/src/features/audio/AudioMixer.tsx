@@ -1,440 +1,754 @@
 import React, { useEffect, useCallback, useState, useRef } from 'react';
 import * as Tone from 'tone';
-import { 
-  Settings2, 
-  Play, 
-  Pause, 
-  Square, 
-  ChevronRight, 
-  RefreshCw,
-  Upload,
-  Volume2,
-  VolumeX
+import {
+  Play,
+  Pause,
+  Square,
+  Repeat,
+  Sliders,
+  Music,
+  Activity,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 import { useStudioStore } from '../../core/useStudioStore';
-import { useAudioComposition } from '../../hooks/useAudioComposition';
-import { useAudioPlayback } from '../../hooks/useAudioPlayback';
-import { useWorktree } from '../../core/useWorktree';
+import { useAudioEngine } from '../../hooks/useAudioEngine';
+
+import {
+  AudioTrackLayer,
+  SongZone,
+  MidiNote,
+  DEFAULT_AUDIO_LAYERS,
+  DEFAULT_SONG_ZONES,
+  DEFAULT_FX_CHAIN,
+  ROOT_NOTES,
+  MUSICAL_SCALES,
+  normalizeAudioState
+} from './types';
+
+import AudioLayersManager from './AudioLayersManager';
+import TrackEffectsInspector from './TrackEffectsInspector';
 import PianoRoll from './PianoRoll';
 import WaveformDisplay from './WaveformDisplay';
-
-interface LayerState {
-  name: string;
-  volume: number;
-  pan: number;
-  active: boolean;
-  solo?: boolean;
-  progress: number;
-  fileName?: string;
-}
+import AiSongRecreator from './AiSongRecreator';
 
 const AudioMixer: React.FC = () => {
-  const { yAudio, yHistory } = useStudioStore();
-  const { isComposing, composingLayerIndex, compositionProgress, lastOutputUrl, compose } = useAudioComposition();
-  const { isPlaying, currentStep, togglePlay, stop, loadResult, meter } = useAudioPlayback();
-  const { isReviewMode, activeProposalId, proposals } = useWorktree();
+  const { yAudio } = useStudioStore();
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedChannelForImport, setSelectedChannelForImport] = useState<number | null>(null);
+  // Song Parameters
+  const [bpm, setBpm] = useState<number>(120);
+  const [songKey, setSongKey] = useState<string>('D');
+  const [songScale, setScale] = useState<string>('Minor');
 
-  const [layers, setLayers] = useState<LayerState[]>([
-    { name: 'Bass Synth', volume: 0, pan: 0, active: true, solo: false, progress: 0 },
-    { name: 'Lead Melody', volume: 0, pan: 0, active: true, solo: false, progress: 0 },
-    { name: 'Percussion', volume: 0, pan: 0, active: true, solo: false, progress: 0 },
-    { name: 'Atmosphere', volume: -6, pan: 0, active: false, solo: false, progress: 0 },
-  ]);
+  // Layers & Zones State
+  const [layers, setLayers] = useState<AudioTrackLayer[]>(DEFAULT_AUDIO_LAYERS);
+  const [zones, setZones] = useState<SongZone[]>(DEFAULT_SONG_ZONES);
+  const [activeLayerId, setActiveLayerId] = useState<string>(DEFAULT_AUDIO_LAYERS[0].id);
+  const [activeZoneId, setActiveZoneId] = useState<string>(DEFAULT_SONG_ZONES[0].id);
 
-  const [bpm, setBpm] = useState(120);
-  const [bottomView, setBottomView] = useState<'piano-roll' | 'waveform' | 'none'>('piano-roll');
-  const [meterLevels, setMeterLevels] = useState<number[]>([0, 0, 0, 0]);
+  // Layout View Tabs
+  const [workspaceView, setWorkspaceView] = useState<'arranger' | 'mixer'>('arranger');
+  const [activeBottomTab, setActiveBottomTab] = useState<'piano-roll' | 'fx' | 'waveform'>('piano-roll');
+  const [showAiDrawer, setShowAiDrawer] = useState<boolean>(false);
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
 
-  // Load audio result when AI returns output
-  useEffect(() => { 
-    if (lastOutputUrl) {
-      loadResult(lastOutputUrl);
-      if (yHistory && composingLayerIndex !== null) {
-        yHistory.push([{
-          type: 'audio',
-          label: `Layer: ${layers[composingLayerIndex].name} (Seed: ${Math.floor(Math.random() * 1000)})`,
-          preview: null,
-          timestamp: Date.now(),
-          url: lastOutputUrl
-        }]);
-      }
-    } 
-  }, [lastOutputUrl, loadResult, yHistory, composingLayerIndex, layers]);
+  // Web Audio Engine Hook
+  const {
+    isPlaying,
+    currentStep,
+    loopCurrentZoneOnly,
+    setLoopCurrentZoneOnly,
+    togglePlay,
+    stop,
+    playAuditionNote,
+    initOrUpdateLayerNodes,
+    masterMeter,
+    trackNodesMap
+  } = useAudioEngine(bpm);
 
-  // Load audio data from active proposal in review mode
+  // Per-track VU meter levels (rAF loop)
+  const [vuLevels, setVuLevels] = useState<Record<string, number>>({});
+  const [masterLevel, setMasterLevel] = useState<number>(0);
+  const vuRafRef = useRef<number | null>(null);
+  const hasWarnedAudioRepairRef = useRef(false);
+
+  // Spacebar play/pause shortcut
   useEffect(() => {
-    if (isReviewMode && activeProposalId) {
-      const proposal = (proposals as any)?.get(activeProposalId);
-      if (proposal?.type === 'audio_layer' && proposal.data) {
-        loadResult(proposal.data);
+    const handleKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay(layers, zones, activeZoneId);
       }
-    }
-  }, [isReviewMode, activeProposalId, proposals, loadResult]);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [togglePlay, layers, zones, activeZoneId]);
 
-  const [composer, setComposer] = useState('standard');
-  const [key, setKey] = useState('C');
-  const [scale, setScale] = useState('Major');
-  const [mood, setMood] = useState('Neutral');
+  // VU meter animation loop — reads Tone.Meter values per track
+  useEffect(() => {
+    const tick = () => {
+      const next: Record<string, number> = {};
+      trackNodesMap.forEach((nodes, layerId) => {
+        const val = nodes.meter.getValue();
+        next[layerId] = typeof val === 'number' ? Math.max(0, Math.min(1, val)) : 0;
+      });
+      setVuLevels(next);
+      // Master meter
+      if (masterMeter) {
+        const mv = masterMeter.getValue();
+        setMasterLevel(typeof mv === 'number' ? Math.max(0, Math.min(1, mv)) : 0);
+      }
+      vuRafRef.current = requestAnimationFrame(tick);
+    };
+    vuRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (vuRafRef.current !== null) cancelAnimationFrame(vuRafRef.current);
+    };
+  }, [trackNodesMap, masterMeter]);
 
+  // Sync state to Yjs
+  const syncToYjs = useCallback((newLayers: AudioTrackLayer[], newZones?: SongZone[]) => {
+    if (!yAudio) return;
+    yAudio.set('layers', newLayers);
+    if (newZones) yAudio.set('zones', newZones);
+    yAudio.set('bpm', bpm);
+    yAudio.set('key', songKey);
+    yAudio.set('scale', songScale);
+  }, [yAudio, bpm, songKey, songScale]);
+
+  // Sync Yjs to local state on external changes
   useEffect(() => {
     if (!yAudio) return;
     const update = () => {
-      const b = yAudio.get('bpm') as number;
-      if (b && b !== bpm) { 
-        setBpm(b); 
-        Tone.getTransport().bpm.value = b; 
+      const storedBpm = yAudio.get('bpm') as number;
+      if (storedBpm && storedBpm !== bpm) {
+        setBpm(storedBpm);
+        Tone.getTransport().bpm.value = storedBpm;
       }
-      const l = yAudio.get('layers') as LayerState[];
-      if (l) setLayers(l);
-      setComposer(yAudio.get('composer') || 'standard');
-      setKey(yAudio.get('key') || 'C');
-      setScale(yAudio.get('scale') || 'Major');
-      setMood(yAudio.get('mood') || 'Neutral');
+      const storedKey = yAudio.get('key') as string;
+      if (storedKey) setSongKey(storedKey);
+      const storedScale = yAudio.get('scale') as string;
+      if (storedScale) setScale(storedScale);
+      const audioState = normalizeAudioState(yAudio.get('layers'), yAudio.get('zones'));
+      setLayers(audioState.layers);
+      setZones(audioState.zones);
+      if (!audioState.layers.some(layer => layer.id === activeLayerId)) {
+        setActiveLayerId(audioState.layers[0].id);
+      }
+      if (!audioState.zones.some(zone => zone.id === activeZoneId)) {
+        setActiveZoneId(audioState.zones[0].id);
+      }
+      if (audioState.repaired && !hasWarnedAudioRepairRef.current) {
+        hasWarnedAudioRepairRef.current = true;
+        toast(
+          'Saved audio data was incomplete. Defaults were restored for this session; edit the affected tracks to save the repaired version.',
+          { icon: '⚠️', duration: 7000 }
+        );
+      }
     };
     yAudio.observe(update);
+    update();
     return () => yAudio.unobserve(update);
-  }, [yAudio, bpm]);
+  }, [yAudio, bpm, activeLayerId, activeZoneId]);
 
-  // Measure VU meter signal levels during playback
-  useEffect(() => {
-    let animId: number;
-    const pollMeter = () => {
-      if (isPlaying && meter) {
-        const val = meter.getValue();
-        const numVal = typeof val === 'number' ? Math.max(0, Math.min(1, val)) : 0;
-        setMeterLevels([
-          numVal * (layers[0]?.active ? 1 : 0),
-          numVal * 0.85 * (layers[1]?.active ? 1 : 0),
-          numVal * 0.9 * (layers[2]?.active ? 1 : 0),
-          numVal * 0.6 * (layers[3]?.active ? 1 : 0)
-        ]);
-      } else {
-        setMeterLevels([0, 0, 0, 0]);
+  // Active layer and zone objects
+  const activeLayer = layers.find(l => l.id === activeLayerId) || layers[0];
+  const activeZone = zones.find(z => z.id === activeZoneId) || zones[0];
+
+  // Update a specific layer
+  const handleUpdateLayer = (layerId: string, updates: Partial<AudioTrackLayer>) => {
+    const nextLayers = layers.map(l => {
+      if (l.id === layerId) {
+        const updated = { ...l, ...updates };
+        initOrUpdateLayerNodes(updated);
+        return updated;
       }
-      animId = requestAnimationFrame(pollMeter);
-    };
-
-    pollMeter();
-    return () => cancelAnimationFrame(animId);
-  }, [isPlaying, meter, layers]);
-
-  const updateYjs = useCallback((l: LayerState[]) => { 
-    yAudio?.set('layers', l); 
-  }, [yAudio]);
-
-  const handleTogglePlay = async () => {
-    // Gather active notes from yAudio
-    const activeMap: Record<string, boolean> = {};
-    if (yAudio) {
-      const NOTES = ['C4', 'B3', 'A#3', 'A3', 'G#3', 'G3', 'F#3', 'F3', 'E3', 'D#3', 'D3', 'C#3', 'C3'];
-      NOTES.forEach(note => {
-        for (let s = 0; s < 32; s++) {
-          const k = `note_${note}_${s}`;
-          if (yAudio.get(k)) activeMap[k] = true;
-        }
-      });
-    }
-    await togglePlay(activeMap);
-  };
-
-  const handleStop = () => {
-    stop();
-  };
-
-  const toggleMute = (index: number) => {
-    const next = [...layers];
-    next[index] = { ...next[index], active: !next[index].active };
-    setLayers(next);
-    updateYjs(next);
-  };
-
-  const toggleSolo = (index: number) => {
-    const next = [...layers];
-    const currentSolo = !next[index].solo;
-    next[index] = { ...next[index], solo: currentSolo };
-    
-    // If any track is soloed, mute others
-    const anySolo = next.some(l => l.solo);
-    next.forEach((l, i) => {
-      l.active = anySolo ? (l.solo === true) : true;
+      return l;
     });
-
-    setLayers(next);
-    updateYjs(next);
+    setLayers(nextLayers);
+    syncToYjs(nextLayers);
   };
 
-  const handleAudioFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || selectedChannelForImport === null) return;
-    const file = files[0];
-    const objectUrl = URL.createObjectURL(file);
-    
-    loadResult(objectUrl);
-    
-    const next = [...layers];
-    next[selectedChannelForImport] = {
-      ...next[selectedChannelForImport],
-      fileName: file.name,
-      active: true
+  // Update notes for active layer and zone
+  const handleNotesChange = (newNotes: MidiNote[]) => {
+    const nextLayers = layers.map(l => {
+      if (l.id === activeLayerId) {
+        return {
+          ...l,
+          zoneNotes: {
+            ...l.zoneNotes,
+            [activeZoneId]: newNotes
+          }
+        };
+      }
+      return l;
+    });
+    setLayers(nextLayers);
+    syncToYjs(nextLayers);
+  };
+
+  // Add new Audio Track Layer
+  const handleAddLayer = (instrumentType: string) => {
+    const id = `layer-${Date.now()}`;
+    const colors = ['#f43f5e', '#818cf8', '#38bdf8', '#10b981', '#f59e0b', '#ec4899', '#a855f7'];
+    const color = colors[layers.length % colors.length];
+
+    let name = 'New Layer';
+    let type: any = 'polysynth';
+    if (instrumentType === 'drums') {
+      name = 'Percussion Kit';
+      type = 'drums';
+    } else if (instrumentType === 'monosynth') {
+      name = 'Sub Bass Synth';
+      type = 'monosynth';
+    } else if (instrumentType === 'lead') {
+      name = 'Lead Synthesizer';
+      type = 'polysynth';
+    } else {
+      name = 'Poly Harmony';
+      type = 'polysynth';
+    }
+
+    const newLayer: AudioTrackLayer = {
+      id,
+      name,
+      color,
+      muted: false,
+      solo: false,
+      volume: -3,
+      pan: 0,
+      instrument: {
+        type,
+        oscillatorType: 'sawtooth',
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.4 }
+      },
+      fx: DEFAULT_FX_CHAIN,
+      zoneNotes: {}
     };
-    setLayers(next);
-    updateYjs(next);
-    toast.success(`Loaded audio clip: ${file.name}`);
+
+    const nextLayers = [...layers, newLayer];
+    setLayers(nextLayers);
+    setActiveLayerId(id);
+    syncToYjs(nextLayers);
+    initOrUpdateLayerNodes(newLayer);
+    toast.success(`Created audio track: ${name}`);
+  };
+
+  // Delete Audio Track Layer
+  const handleDeleteLayer = (layerId: string) => {
+    if (layers.length <= 1) {
+      toast.error('Cannot delete the last remaining track');
+      return;
+    }
+    const nextLayers = layers.filter(l => l.id !== layerId);
+    setLayers(nextLayers);
+    if (activeLayerId === layerId) {
+      setActiveLayerId(nextLayers[0].id);
+    }
+    syncToYjs(nextLayers);
+    toast.success('Track removed');
+  };
+
+  // Add Song Zone
+  const handleAddZone = () => {
+    const zoneNames = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Drop', 'Outro', 'Solo'];
+    const nextIdx = zones.length;
+    const name = zoneNames[nextIdx % zoneNames.length] || `Section ${nextIdx + 1}`;
+    const colors = ['#38bdf8', '#818cf8', '#f43f5e', '#10b981', '#f59e0b', '#ec4899'];
+    const newZone: SongZone = {
+      id: `zone-${Date.now()}`,
+      name,
+      startStep: zones.length * 32,
+      lengthSteps: 32,
+      color: colors[zones.length % colors.length]
+    };
+    const nextZones = [...zones, newZone];
+    setZones(nextZones);
+    setActiveZoneId(newZone.id);
+    syncToYjs(layers, nextZones);
+    toast.success(`Added song zone: ${name}`);
+  };
+
+  // Rename Zone
+  const handleRenameZone = (zoneId: string, newName: string) => {
+    const nextZones = zones.map(z => z.id === zoneId ? { ...z, name: newName } : z);
+    setZones(nextZones);
+    syncToYjs(layers, nextZones);
+    toast.success(`Zone renamed to "${newName}"`);
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-studio-background overflow-hidden text-studio-text select-none">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="audio/*"
-        className="hidden"
-        onChange={handleAudioFileImport}
-      />
-
-      {/* Top Transport Bar */}
-      <div className="h-12 border-b border-studio-border flex items-center px-4 bg-studio-header justify-between shadow-sm z-10">
-        <div className="flex items-center gap-4">
-          <div className="flex bg-black/40 rounded-lg border border-studio-border p-1 shadow-inner">
-            <button 
+    <div className={`flex flex-col h-full w-full bg-[#07070b] text-studio-text select-none overflow-hidden ${isFocusMode ? 'fixed inset-0 z-50' : ''}`}>
+      {/* TOP MASTER TRANSPORT & SETTINGS BAR (44px) */}
+      <div className="h-11 bg-studio-header border-b border-studio-border px-3 flex items-center justify-between shrink-0 shadow-sm z-20">
+        {/* Left: Transport Controls & Playhead Info */}
+        <div className="flex items-center gap-3">
+          {/* Play & Stop Buttons */}
+          <div className="flex bg-black/60 rounded-lg border border-studio-border p-1 shadow-inner">
+            <button
               type="button"
-              onClick={handleTogglePlay} 
-              className={`p-1.5 hover:bg-studio-accent/20 rounded-md transition-all ${
-                isPlaying ? 'text-studio-accent' : 'text-studio-text-dim hover:text-white'
+              onClick={() => togglePlay(layers, zones, activeZoneId)}
+              className={`p-1.5 rounded-md transition-all ${
+                isPlaying ? 'bg-studio-accent text-white shadow-md' : 'text-studio-text-dim hover:text-white'
               }`}
-              title={isPlaying ? 'Pause' : 'Play (Space)'}
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             >
-              {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+              {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
             </button>
-            <button 
+            <button
               type="button"
-              onClick={handleStop} 
-              className="p-1.5 hover:bg-studio-accent/20 rounded-md text-studio-text-dim hover:text-red-400 transition-all"
+              onClick={stop}
+              className="p-1.5 rounded-md text-studio-text-dim hover:text-red-400 transition-all"
               title="Stop"
             >
-              <Square size={18} fill="currentColor" />
+              <Square size={16} fill="currentColor" />
             </button>
           </div>
-          <div className="flex flex-col">
-            <div className="text-[10px] font-mono text-studio-accent font-bold">
-              MASTER AUDIO OUTPUT
-            </div>
-            <div className="text-[9px] font-mono text-studio-text-dim tracking-wider">
-              {isPlaying ? `STEP ${currentStep + 1}/32 • PLAYING` : 'TRANSPORT STOPPED'}
+
+          {/* Loop Zone Toggle */}
+          <button
+            type="button"
+            onClick={() => setLoopCurrentZoneOnly(!loopCurrentZoneOnly)}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold border transition-all ${
+              loopCurrentZoneOnly
+                ? 'bg-studio-accent/20 border-studio-accent text-studio-accent'
+                : 'bg-black/30 border-studio-border text-studio-text-dim hover:text-white'
+            }`}
+            title="Toggle between looping active zone or playing entire song sequence"
+          >
+            <Repeat size={12} />
+            <span>{loopCurrentZoneOnly ? 'Loop Zone' : 'Play Song'}</span>
+          </button>
+
+          {/* Step Indicator + Master VU */}
+          <div className="flex flex-col font-mono text-[9px] leading-tight">
+            <span className="text-studio-accent font-bold">
+              {isPlaying ? `STEP ${currentStep + 1}/32 • ${activeZone.name.toUpperCase()}` : 'TRANSPORT STOPPED'}
+            </span>
+            <span className="text-studio-text-dim">
+              TIME: {Math.floor(currentStep / 16) + 1}.{(Math.floor(currentStep / 4) % 4) + 1}.{(currentStep % 4) + 1}
+            </span>
+          </div>
+
+          {/* Master VU strip in transport bar */}
+          <div className="flex items-center gap-1 ml-1">
+            <span className="text-[8px] font-bold uppercase tracking-widest text-studio-text-dim">OUT</span>
+            <div className="flex gap-px h-5">
+              {Array.from({ length: 12 }).map((_, i) => {
+                const threshold = i / 12;
+                const lit = masterLevel > threshold;
+                const color = i >= 10 ? 'bg-red-500' : i >= 8 ? 'bg-amber-400' : 'bg-emerald-500';
+                return (
+                  <div
+                    key={i}
+                    className={`w-1.5 h-full rounded-sm transition-all duration-75 ${lit ? color : 'bg-white/[0.06]'}`}
+                  />
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* BPM & Settings */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-3 py-1 bg-black/40 rounded-full border border-studio-border">
-            <span className="text-[10px] text-studio-text-dim font-bold tracking-wider uppercase">BPM</span>
-            <input 
-              type="number" 
+        {/* Center: BPM, Musical Key & Scale */}
+        <div className="flex items-center gap-2">
+          {/* BPM */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/50 border border-studio-border rounded-lg text-xs">
+            <span className="text-[10px] text-studio-text-dim font-bold uppercase">BPM</span>
+            <input
+              type="number"
               min={40}
               max={240}
-              value={bpm} 
-              onChange={(e) => { 
-                const b = parseInt(e.target.value) || 120; 
-                setBpm(b); 
-                Tone.getTransport().bpm.value = b; 
-                yAudio?.set('bpm', b); 
+              value={bpm}
+              onChange={e => {
+                const b = Math.min(240, Math.max(40, parseInt(e.target.value) || 120));
+                setBpm(b);
+                Tone.getTransport().bpm.value = b;
+                syncToYjs(layers);
               }}
-              className="w-12 bg-transparent text-xs font-mono text-studio-accent text-center focus:outline-none" 
+              className="w-11 bg-transparent text-xs font-mono text-studio-accent font-bold text-center focus:outline-none"
             />
           </div>
 
-          <div className="w-px h-6 bg-studio-border" />
-          
-          <div className="flex bg-black/40 rounded-lg border border-studio-border p-1">
-            <button 
+          {/* Key */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-black/50 border border-studio-border rounded-lg text-xs">
+            <span className="text-[10px] text-studio-text-dim font-bold uppercase">Key</span>
+            <select
+              value={songKey}
+              onChange={e => {
+                setSongKey(e.target.value);
+                syncToYjs(layers);
+              }}
+              className="bg-transparent font-mono text-xs font-bold text-studio-accent focus:outline-none"
+            >
+              {ROOT_NOTES.map(k => (
+                <option key={k} value={k} className="bg-studio-panel text-white">{k}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Scale */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-black/50 border border-studio-border rounded-lg text-xs">
+            <span className="text-[10px] text-studio-text-dim font-bold uppercase">Scale</span>
+            <select
+              value={songScale}
+              onChange={e => {
+                setScale(e.target.value);
+                syncToYjs(layers);
+              }}
+              className="bg-transparent font-mono text-xs font-bold text-studio-accent focus:outline-none"
+            >
+              {Object.keys(MUSICAL_SCALES).map(s => (
+                <option key={s} value={s} className="bg-studio-panel text-white">{s}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Right: View Switcher, AI Co-Producer Drawer Toggle & Full-Screen Focus */}
+        <div className="flex items-center gap-2">
+          {/* Arranger vs Mixer View Toggle */}
+          <div className="flex bg-black/50 border border-studio-border rounded-lg p-0.5">
+            <button
               type="button"
-              onClick={() => setBottomView(bottomView === 'piano-roll' ? 'none' : 'piano-roll')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all ${
-                bottomView === 'piano-roll' 
-                  ? 'bg-studio-accent text-white shadow-sm' 
+              onClick={() => setWorkspaceView('arranger')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                workspaceView === 'arranger'
+                  ? 'bg-studio-accent text-white shadow-sm'
                   : 'text-studio-text-dim hover:text-white'
               }`}
             >
-              <span>Piano Roll</span>
+              Arranger
             </button>
-            <button 
+            <button
               type="button"
-              onClick={() => setBottomView(bottomView === 'waveform' ? 'none' : 'waveform')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all ${
-                bottomView === 'waveform' 
-                  ? 'bg-studio-accent text-white shadow-sm' 
+              onClick={() => setWorkspaceView('mixer')}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                workspaceView === 'mixer'
+                  ? 'bg-studio-accent text-white shadow-sm'
                   : 'text-studio-text-dim hover:text-white'
               }`}
             >
-              <span>Waveform</span>
+              Console Mixer
             </button>
           </div>
+
+          {/* AI Co-Producer Drawer Button */}
+          <button
+            type="button"
+            onClick={() => setShowAiDrawer(!showAiDrawer)}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
+              showAiDrawer
+                ? 'bg-studio-accent-orange text-white border-studio-accent-orange shadow-md'
+                : 'bg-black/40 border-studio-border text-studio-text-dim hover:text-white hover:border-studio-accent'
+            }`}
+          >
+            <Music size={13} />
+            <span>MIDI Templates</span>
+          </button>
+
+          {/* Focus Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsFocusMode(!isFocusMode)}
+            className="p-1.5 rounded-lg bg-black/40 border border-studio-border text-studio-text-dim hover:text-white"
+            title={isFocusMode ? 'Exit Focus Mode' : 'Maximize Workspace (Focus Mode)'}
+          >
+            {isFocusMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
         </div>
       </div>
 
-      {/* Main Mixer Section */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-studio-background">
-        <div className="flex-1 flex p-6 gap-4 overflow-x-auto custom-scrollbar items-start">
-          {layers.map((layer, index) => {
-            const level = meterLevels[index] || 0;
-            const activeLeds = Math.round(level * 16);
+      {/* AI CO-PRODUCER COLLAPSIBLE DRAWER */}
+      {showAiDrawer && (
+        <div className="border-b border-studio-border bg-[#0a0a12] p-2 animate-in slide-in-from-top duration-200">
+          <AiSongRecreator
+            layers={layers}
+            zones={zones}
+            songKey={songKey}
+            songScale={songScale}
+            bpm={bpm}
+            activeLayerId={activeLayerId}
+            activeZoneId={activeZoneId}
+            onUpdateLayers={nextLayers => {
+              setLayers(nextLayers);
+              syncToYjs(nextLayers);
+            }}
+            onKeyChange={(key, scale) => {
+              setSongKey(key);
+              setScale(scale);
+              yAudio?.set('key', key);
+              yAudio?.set('scale', scale);
+            }}
+            onBpmChange={nextBpm => {
+              setBpm(nextBpm);
+              Tone.getTransport().bpm.value = nextBpm;
+              yAudio?.set('bpm', nextBpm);
+            }}
+          />
+        </div>
+      )}
 
-            return (
-              <div 
-                key={layer.name} 
-                className={`w-52 min-w-[13rem] flex-shrink-0 bg-studio-panel border rounded-xl p-4 flex flex-col shadow-xl transition-all ${
-                  !layer.active 
-                    ? 'opacity-40 grayscale-[0.6] border-studio-border' 
-                    : layer.solo 
-                      ? 'border-amber-400/80 ring-1 ring-amber-400/30' 
-                      : 'border-studio-border hover:border-studio-accent/50'
-                }`}
-              >
-                {/* Channel Header */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-bold uppercase tracking-tight text-studio-text truncate">
-                      {layer.name}
-                    </span>
-                    <span className="text-[9px] text-studio-accent font-mono">CHANNEL {index + 1}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setSelectedChannelForImport(index);
-                        fileInputRef.current?.click();
-                      }}
-                      className="p-1 rounded bg-black/40 text-studio-text-dim hover:text-white border border-studio-border"
-                      title="Import audio file into channel"
-                    >
-                      <Upload size={12} />
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => compose(index, Math.floor(Math.random() * 1000000), { bpm, composer, key, scale, mood })} 
-                      disabled={isComposing} 
-                      className={`p-1 rounded transition-all ${
-                        composingLayerIndex === index 
-                          ? 'animate-spin bg-studio-accent text-white' 
-                          : 'bg-black/40 text-studio-text-dim hover:text-studio-accent hover:bg-studio-accent/10 border border-studio-border'
-                      }`}
-                      title="AI Compose Layer"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {layer.fileName && (
-                  <div className="text-[9px] text-studio-text-dim font-mono truncate mb-2 bg-black/30 px-1.5 py-0.5 rounded border border-studio-border">
-                    🎵 {layer.fileName}
-                  </div>
-                )}
-
-                {/* Fader & LED Meter Section */}
-                <div className="flex-1 flex gap-4 mb-4 h-44 min-h-[11rem]">
-                  {/* Vertical Volume Fader */}
-                  <div className="w-9 bg-black/60 rounded-lg relative overflow-hidden flex flex-col justify-end p-1 border border-studio-border/60 group">
-                    <input 
-                      type="range" 
-                      min="-60" 
-                      max="6" 
-                      value={layer.volume} 
-                      onChange={(e) => { 
-                        const next = [...layers]; 
-                        next[index].volume = parseInt(e.target.value); 
-                        setLayers(next); 
-                        updateYjs(next); 
-                      }} 
-                      className="absolute inset-0 opacity-0 cursor-pointer -rotate-90 origin-center z-10" 
-                      style={{ width: '160px', left: '-62px', top: '70px' }} 
-                    />
-                    <div 
-                      className="w-full bg-studio-accent rounded shadow-[0_0_8px_rgba(99,102,241,0.5)] transition-all duration-75" 
-                      style={{ height: `${((layer.volume + 60) / 66) * 100}%` }} 
-                    />
-                  </div>
-
-                  {/* 16-Segment LED VU Meter */}
-                  <div className="flex-1 flex flex-col gap-1 justify-between py-1 bg-black/30 p-1.5 rounded border border-studio-border/30">
-                    {[...Array(16)].map((_, i) => {
-                      const segIndex = 15 - i;
-                      const isLit = isPlaying && activeLeds > segIndex;
-                      const isPeak = segIndex >= 13;
-                      const isWarning = segIndex >= 10 && segIndex < 13;
-
+      {/* MAIN TOP AREA (55% height): Arranger / Audio Layers Timeline OR Console Mixer */}
+      <div className="flex-[55] min-h-0 min-w-0 flex overflow-hidden">
+        {workspaceView === 'arranger' ? (
+          <AudioLayersManager
+            layers={layers}
+            zones={zones}
+            activeLayerId={activeLayerId}
+            activeZoneId={activeZoneId}
+            currentStep={currentStep}
+            isPlaying={isPlaying}
+            onSelectLayer={setActiveLayerId}
+            onSelectZone={setActiveZoneId}
+            onUpdateLayer={handleUpdateLayer}
+            onAddLayer={handleAddLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onAddZone={handleAddZone}
+            onRenameZone={handleRenameZone}
+          />
+        ) : (
+          /* Console Mixer View */
+          <div className="flex-1 flex gap-2 p-3 overflow-x-auto custom-scrollbar bg-[#060609] items-stretch">
+            {/* Master Channel Strip */}
+            <div className="w-20 min-w-[5rem] bg-[#0d0d14] border border-studio-border/80 rounded-xl p-2 flex flex-col gap-2 shadow-xl">
+              <div className="text-[8px] font-bold uppercase tracking-widest text-studio-text-dim text-center border-b border-studio-border/40 pb-1">
+                MASTER
+              </div>
+              {/* Master VU */}
+              <div className="flex justify-center gap-0.5 flex-1">
+                {[0, 1].map(ch => (
+                  <div key={ch} className="flex flex-col-reverse gap-px w-2.5">
+                    {Array.from({ length: 16 }).map((_, i) => {
+                      const threshold = i / 16;
+                      const lit = masterLevel > threshold;
+                      const color = i >= 14 ? 'bg-red-500' : i >= 11 ? 'bg-amber-400' : 'bg-emerald-500';
                       return (
-                        <div 
-                          key={i} 
-                          className={`h-1 rounded-full transition-all duration-75 ${
-                            isLit 
-                              ? isPeak 
-                                ? 'bg-red-500 shadow-[0_0_6px_#ef4444]' 
-                                : isWarning 
-                                  ? 'bg-amber-400 shadow-[0_0_5px_#f59e0b]' 
-                                  : 'bg-studio-accent shadow-[0_0_4px_#6366f1]' 
-                              : 'bg-white/5'
-                          }`} 
+                        <div
+                          key={i}
+                          className={`h-1 rounded-sm transition-all duration-75 ${lit ? color : 'bg-white/[0.06]'}`}
                         />
                       );
                     })}
                   </div>
-                </div>
-
-                {/* Channel Fader Decibel label */}
-                <div className="text-[10px] font-mono text-center text-studio-text-dim mb-3">
-                  {layer.volume > 0 ? `+${layer.volume}` : layer.volume} dB
-                </div>
-
-                {/* Mute & Solo Buttons */}
-                <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-studio-border/40">
-                  <button 
-                    type="button"
-                    onClick={() => toggleMute(index)}
-                    className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                      !layer.active 
-                        ? 'bg-red-500/20 border-red-500 text-red-400 shadow-sm' 
-                        : 'bg-black/40 border-studio-border text-studio-text-dim hover:text-white'
-                    }`}
-                  >
-                    MUTE
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => toggleSolo(index)}
-                    className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                      layer.solo 
-                        ? 'bg-amber-400 text-black border-amber-400 shadow-sm' 
-                        : 'bg-black/40 border-studio-border text-studio-text-dim hover:text-white'
-                    }`}
-                  >
-                    SOLO
-                  </button>
-                </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
-        
-        {/* Docked Audio Editor Section (Piano Roll or Waveform Timeline) */}
-        {bottomView === 'piano-roll' && (
-          <div className="h-64 min-h-[16rem] border-t border-studio-border bg-studio-panel p-3 overflow-hidden shadow-2xl z-20">
-            <PianoRoll currentStep={currentStep} isPlaying={isPlaying} />
+              <div className="text-[8px] font-mono text-center text-emerald-400 font-bold">
+                {masterLevel > 0 ? `${Math.round(masterLevel * 100)}%` : '—'}
+              </div>
+            </div>
+
+            {/* Per-Track Channel Strips */}
+            {layers.map((layer) => {
+              const level = vuLevels[layer.id] || 0;
+              const isActive = activeLayerId === layer.id;
+              return (
+                <div
+                  key={layer.id}
+                  onClick={() => setActiveLayerId(layer.id)}
+                  className={`w-20 min-w-[5rem] bg-[#0d0d14] border rounded-xl p-2 flex flex-col gap-1.5 shadow-xl transition-all cursor-pointer ${
+                    isActive
+                      ? 'border-studio-accent ring-1 ring-studio-accent/30'
+                      : 'border-studio-border/50 hover:border-studio-border'
+                  }`}
+                >
+                  {/* Color Tag + Name */}
+                  <div
+                    className="h-1 rounded-full"
+                    style={{ backgroundColor: layer.color }}
+                  />
+                  <div className="text-[8px] font-bold text-studio-text truncate text-center leading-tight">
+                    {layer.name}
+                  </div>
+
+                  {/* Instrument Badge */}
+                  <div
+                    className="text-[7px] font-mono font-bold uppercase text-center px-1 py-0.5 rounded"
+                    style={{ backgroundColor: `${layer.color}25`, color: layer.color }}
+                  >
+                    {layer.instrument.type}
+                  </div>
+
+                  {/* LED VU Meter */}
+                  <div className="flex justify-center gap-0.5 flex-1">
+                    {[0, 1].map(ch => (
+                      <div key={ch} className="flex flex-col-reverse gap-px w-2">
+                        {Array.from({ length: 16 }).map((_, i) => {
+                          const threshold = i / 16;
+                          const lit = level > threshold && !layer.muted;
+                          const color = i >= 14 ? 'bg-red-500' : i >= 11 ? 'bg-amber-400' : layer.muted ? 'bg-gray-600' : 'bg-emerald-500';
+                          return (
+                            <div
+                              key={i}
+                              className={`h-1 rounded-sm transition-all duration-75 ${lit ? color : 'bg-white/[0.05]'}`}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pan Control */}
+                  <div className="flex flex-col items-center gap-0.5 px-1 py-0.5 bg-black/30 rounded border border-white/5">
+                    <div className="flex justify-between w-full text-[7px] text-studio-text-dim font-mono">
+                      <span>L</span>
+                      <span className="font-bold text-studio-accent">
+                        {layer.pan === 0 ? 'C' : layer.pan > 0 ? `R${Math.round(layer.pan * 100)}` : `L${Math.round(Math.abs(layer.pan) * 100)}`}
+                      </span>
+                      <span>R</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1"
+                      max="1"
+                      step="0.05"
+                      value={layer.pan}
+                      onChange={e => handleUpdateLayer(layer.id, { pan: Number(e.target.value) })}
+                      onClick={e => e.stopPropagation()}
+                      className="w-full accent-studio-accent h-1 bg-black/60 rounded cursor-pointer"
+                      title={`Pan: ${layer.pan}`}
+                    />
+                  </div>
+
+                  {/* Vertical Fader */}
+                  <div className="flex flex-col items-center gap-1 py-1">
+                    <input
+                      type="range"
+                      min="-40"
+                      max="6"
+                      value={layer.volume}
+                      onChange={e => handleUpdateLayer(layer.id, { volume: Number(e.target.value) })}
+                      onClick={e => e.stopPropagation()}
+                      className="h-16 accent-studio-accent cursor-pointer"
+                      style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                      title={`${layer.volume > 0 ? '+' : ''}${layer.volume} dB`}
+                    />
+                    <span className="font-mono text-[8px] font-bold text-studio-text-dim">
+                      {layer.volume > 0 ? `+${layer.volume}` : layer.volume}
+                    </span>
+                  </div>
+
+                  {/* Mute & Solo */}
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); handleUpdateLayer(layer.id, { muted: !layer.muted }); }}
+                      className={`flex-1 py-0.5 rounded text-[8px] font-bold border transition-all ${
+                        layer.muted
+                          ? 'bg-red-500/40 text-red-200 border-red-500/60'
+                          : 'bg-black/40 text-studio-text-dim border-studio-border/40 hover:text-white'
+                      }`}
+                    >M</button>
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); handleUpdateLayer(layer.id, { solo: !layer.solo }); }}
+                      className={`flex-1 py-0.5 rounded text-[8px] font-bold border transition-all ${
+                        layer.solo
+                          ? 'bg-amber-400 text-black border-amber-400'
+                          : 'bg-black/40 text-studio-text-dim border-studio-border/40 hover:text-white'
+                      }`}
+                    >S</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-        {bottomView === 'waveform' && (
-          <div className="h-64 min-h-[16rem] border-t border-studio-border bg-studio-panel p-3 overflow-hidden shadow-2xl z-20">
-            <WaveformDisplay 
-              currentStep={currentStep} 
-              isPlaying={isPlaying} 
+      </div>
+
+      {/* LOWER TRACK DETAIL INSPECTOR (45% height): Piano Roll / Effects Rack / Waveform */}
+      <div className="flex-[45] min-h-0 min-w-0 border-t border-studio-border flex flex-col bg-[#07070b]">
+        {/* Detail Tabs Bar */}
+        <div className="h-8 bg-[#0b0b12] border-b border-studio-border px-3 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-studio-text-dim">
+              Track Inspector:
+            </span>
+            <span className="text-xs font-bold" style={{ color: activeLayer.color }}>
+              {activeLayer.name}
+            </span>
+          </div>
+
+          {/* 3 Inspector Tabs */}
+          <div className="flex bg-black/40 border border-studio-border rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveBottomTab('piano-roll')}
+              className={`flex items-center gap-1.5 px-3 py-0.5 rounded text-[11px] font-bold transition-all ${
+                activeBottomTab === 'piano-roll'
+                  ? 'bg-studio-accent text-white shadow-sm'
+                  : 'text-studio-text-dim hover:text-white'
+              }`}
+            >
+              <Music size={11} />
+              <span>MIDI Piano Roll</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveBottomTab('fx')}
+              className={`flex items-center gap-1.5 px-3 py-0.5 rounded text-[11px] font-bold transition-all ${
+                activeBottomTab === 'fx'
+                  ? 'bg-studio-accent text-white shadow-sm'
+                  : 'text-studio-text-dim hover:text-white'
+              }`}
+            >
+              <Sliders size={11} />
+              <span>Effects Rack (Insert FX)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveBottomTab('waveform')}
+              className={`flex items-center gap-1.5 px-3 py-0.5 rounded text-[11px] font-bold transition-all ${
+                activeBottomTab === 'waveform'
+                  ? 'bg-studio-accent text-white shadow-sm'
+                  : 'text-studio-text-dim hover:text-white'
+              }`}
+            >
+              <Activity size={11} />
+              <span>Waveform Audio</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tab 1: MIDI Piano Roll */}
+        {activeBottomTab === 'piano-roll' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <PianoRoll
+              layer={activeLayer}
+              zone={activeZone}
+              songKey={songKey}
+              songScale={songScale}
+              currentStep={currentStep}
+              isPlaying={isPlaying}
+              onNotesChange={handleNotesChange}
+              onAudition={(pitch) => playAuditionNote(activeLayer, pitch)}
+            />
+          </div>
+        )}
+
+        {/* Tab 2: Track Effects Rack */}
+        {activeBottomTab === 'fx' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <TrackEffectsInspector
+              fx={activeLayer.fx}
+              trackName={activeLayer.name}
+              onFxChange={(newFx) => handleUpdateLayer(activeLayer.id, { fx: newFx })}
+            />
+          </div>
+        )}
+
+        {/* Tab 3: Waveform Timeline */}
+        {activeBottomTab === 'waveform' && (
+          <div className="flex-1 min-h-0 overflow-hidden p-2">
+            <WaveformDisplay
+              currentStep={currentStep}
+              isPlaying={isPlaying}
               channelNames={layers.map(l => l.name)}
+              channelColors={layers.map(l => l.color)}
+              activeChannel={layers.findIndex(l => l.id === activeLayerId)}
             />
           </div>
         )}
